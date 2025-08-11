@@ -20,7 +20,11 @@ const timerDisplay = document.getElementById("timerDisplay");
 const startTimerBtn = document.getElementById("startTimerBtn");
 const pauseTimerBtn = document.getElementById("pauseTimerBtn");
 const stopTimerBtn = document.getElementById("stopTimerBtn");
+// NEW: global progress
 const overallPctEl = document.getElementById("overallPct");
+const overallCountEl = document.getElementById("overallCount");
+const overallBarEl = document.getElementById("overallBar");
+
 const studiedTodayEl = document.getElementById("studiedToday");
 const streakDaysEl = document.getElementById("streakDays");
 
@@ -44,11 +48,9 @@ function loadState(){
   }
   try{
     const parsed = JSON.parse(raw);
-    // daily rollover
     if (!parsed.today || parsed.today.date !== todayISO()){
       parsed.today = { date: todayISO(), queue: [], active: null, studiedSeconds: 0 };
     }
-    // default settings
     parsed.settings = parsed.settings || { dailyGoalMinutes: 120 };
     return parsed;
   }catch{
@@ -105,7 +107,6 @@ function renderSections(){
 
       doneEl.addEventListener("change", () => {
         it.done = doneEl.checked;
-        // if you mark done, remove from Today if present
         removeFromToday(sec.id, it.id, false);
         persist(); renderAll();
       });
@@ -153,6 +154,8 @@ function renderStats(){
   const [done, total] = totalDoneOverall();
   const pct = total ? Math.round(100*done/total) : 0;
   overallPctEl.textContent = pct + "%";
+  overallCountEl.textContent = `${done}/${total}`;
+  overallBarEl.style.width = pct + "%";
 
   const studiedMin = Math.round((state.today.studiedSeconds || 0) / 60);
   studiedTodayEl.textContent = `${studiedMin} min`;
@@ -177,8 +180,7 @@ function setupEvents(){
   clearTodayBtn.addEventListener("click", clearTodayQueue);
 
   startTimerBtn.addEventListener("click", () => {
-    if (state.today.active) return; // already running
-    // start the first queued item if exists
+    if (state.today.active) return;
     if (state.today.queue[0]) {
       const {sectionId, itemId} = state.today.queue[0];
       startTimer(sectionId, itemId);
@@ -203,17 +205,14 @@ function renameSection(secId){
 }
 function deleteSection(secId){
   if (!confirm("Delete this section and all its items?")) return;
-  // also remove any from Today
   const sec = findSection(secId);
-  if (sec){
-    sec.items.forEach(it => removeFromToday(secId, it.id, false));
-  }
+  if (sec){ sec.items.forEach(it => removeFromToday(secId, it.id, false)); }
   state.sections = state.sections.filter(s => s.id !== secId);
   persist(); renderAll();
 }
 function addItem(secId){
   const sec = findSection(secId); if (!sec) return;
-  const title = prompt("Item title (eg, Staph aureus):");
+  const title = prompt("Item title:");
   if (!title) return;
   sec.items.push({ id: cryptoId(), title, duration: "", notes: "", done: false });
   persist(); renderSections();
@@ -289,8 +288,7 @@ function pauseTimer(){
   if (!state.today.active) return;
   const delta = Math.floor((Date.now() - state.today.active.startedAt)/1000);
   state.today.active.elapsed += delta;
-  state.today.active.startedAt = Date.now(); // keep for resume measurement
-  // treat pause as adding to studiedSeconds but not marking done
+  state.today.active.startedAt = Date.now();
   state.today.studiedSeconds += delta;
   persist(); renderTimerUI(); renderStats();
 }
@@ -298,7 +296,6 @@ function stopTimer(){
   if (!state.today.active) return;
   const delta = Math.floor((Date.now() - state.today.active.startedAt)/1000);
   state.today.studiedSeconds += delta;
-  // Mark item done on stop
   const {sectionId, itemId} = state.today.active;
   const sec = findSection(sectionId); if (sec){
     const it = sec.items.find(i=>i.id===itemId);
@@ -342,7 +339,6 @@ function onImport(e){
   reader.onload = () => {
     try{
       const imported = JSON.parse(reader.result);
-      // keep your current settings if present
       if (!imported.settings) imported.settings = state.settings;
       state = imported;
       persist(); renderAll();
@@ -388,7 +384,6 @@ function formatHMS(secs){
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 function uncompletedItems(){
-  // Flatten in order they appear
   const out = [];
   state.sections.forEach(sec=>{
     sec.items.forEach(it=>{
@@ -413,13 +408,10 @@ function totalDoneOverall(){
   return [done,total];
 }
 function calcStreak(){
-  // any minutes >0 counts as a day
   const days = Object.keys(state.history || {});
   const today = todayISO();
-  // update history for today
   state.history[today] = Math.round((state.today.studiedSeconds||0)/60);
   persist();
-  // compute continuous days back from today
   let streak = 0;
   let d = new Date(today);
   while (true){
