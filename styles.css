@@ -28,7 +28,7 @@ h1{margin:0;font-size:22px}
 .controls .import input{display:none}
 .controls .import{border:1px dashed var(--border); padding:6px 10px; border-radius:8px; cursor:pointer}
 
-/* NEW: Global progress bar area */
+/* Global progress */
 .global-progress-wrap{
   display:grid; grid-template-columns:240px 1fr; gap:12px;
   max-width:1150px; margin:12px auto 0; padding:0 16px;
@@ -39,6 +39,7 @@ h1{margin:0;font-size:22px}
 .count-muted{color:var(--muted)}
 .progress-wide{width:100%}
 
+/* Main layout */
 .grid{
   display:grid; grid-template-columns:2fr 1fr; gap:16px; max-width:1150px; margin:16px auto 20px; padding:0 16px;
 }
@@ -87,6 +88,18 @@ h1{margin:0;font-size:22px}
 .clock{font-variant-numeric:tabular-nums; font-weight:700}
 
 .stats{margin-top:12px; display:grid; gap:4px; font-size:14px}
+
+/* Analytics */
+.analytics{display:grid; gap:12px}
+.analytics-row{display:flex; gap:16px; flex-wrap:wrap}
+.donut-wrap{position:relative; width:220px; height:220px}
+.donut-center{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:20px; pointer-events:none;
+}
+.legend{display:grid; gap:6px; margin-top:4px}
+.legend-row{display:flex; align-items:center; gap:8px; font-size:14px}
+.legend-row input[type="color"]{width:24px; height:24px; border:none; background:transparent; padding:0}
 
 @media (max-width: 980px){
   .grid{grid-template-columns:1fr}
