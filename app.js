@@ -20,13 +20,17 @@ const timerDisplay = document.getElementById("timerDisplay");
 const startTimerBtn = document.getElementById("startTimerBtn");
 const pauseTimerBtn = document.getElementById("pauseTimerBtn");
 const stopTimerBtn = document.getElementById("stopTimerBtn");
-// NEW: global progress
+// Global progress
 const overallPctEl = document.getElementById("overallPct");
 const overallCountEl = document.getElementById("overallCount");
 const overallBarEl = document.getElementById("overallBar");
-
 const studiedTodayEl = document.getElementById("studiedToday");
 const streakDaysEl = document.getElementById("streakDays");
+
+// NEW: bulk add controls
+const bulkBtn = document.getElementById("bulkBtn");
+const bulkFile = document.getElementById("bulkFile");
+const templateBtn = document.getElementById("templateBtn");
 
 // Templates
 const sectionTmpl = document.getElementById("sectionTmpl");
@@ -59,15 +63,15 @@ function loadState(){
     return starter;
   }
 }
-function persist(s=state){
-  localStorage.setItem(LS_KEY, JSON.stringify(s));
-}
+function persist(s=state){ localStorage.setItem(LS_KEY, JSON.stringify(s)); }
+
 function renderAll(){
   dailyGoalEl.value = state.settings.dailyGoalMinutes ?? 120;
   renderSections();
   renderToday();
   renderStats();
 }
+
 function renderSections(){
   sectionsEl.innerHTML = "";
   const q = (searchEl.value || "").trim().toLowerCase();
@@ -82,7 +86,7 @@ function renderSections(){
     const visibleItems = sec.items.filter(it => matchesQuery(it, q));
     countEl.textContent = `${visibleItems.length}/${sec.items.length} shown`;
 
-    // progress
+    // section progress
     const doneCount = sec.items.filter(i => i.done).length;
     const pct = sec.items.length ? Math.round(100*doneCount/sec.items.length) : 0;
     progressEl.style.width = pct + "%";
@@ -93,7 +97,7 @@ function renderSections(){
     el.querySelector(".delete").addEventListener("click", () => deleteSection(sec.id));
 
     // items
-    visibleItems.forEach((it, idx) => {
+    visibleItems.forEach((it) => {
       const row = itemTmpl.content.firstElementChild.cloneNode(true);
       const doneEl = row.querySelector(".done");
       const titleIn = row.querySelector(".title");
@@ -125,6 +129,7 @@ function renderSections(){
     sectionsEl.appendChild(el);
   });
 }
+
 function renderToday(){
   todayListEl.innerHTML = "";
   state.today.queue.forEach((q, idx) => {
@@ -159,7 +164,6 @@ function renderStats(){
 
   const studiedMin = Math.round((state.today.studiedSeconds || 0) / 60);
   studiedTodayEl.textContent = `${studiedMin} min`;
-
   streakDaysEl.textContent = `${calcStreak()} days`;
 }
 
@@ -188,6 +192,11 @@ function setupEvents(){
   });
   pauseTimerBtn.addEventListener("click", pauseTimer);
   stopTimerBtn.addEventListener("click", stopTimer);
+
+  // Bulk add
+  bulkBtn.addEventListener("click", () => bulkFile.click());
+  bulkFile.addEventListener("change", handleBulkFile);
+  templateBtn.addEventListener("click", downloadTemplateCSV);
 }
 
 // ————— Sections/Items CRUD —————
@@ -307,24 +316,21 @@ function stopTimer(){
 }
 function tickTimer(){
   if (!state.today.active){
-    timerDisplay.textContent = "00:00:00";
-    return;
+    timerDisplay.textContent = "00:00:00"; return;
   }
   const secs = Math.floor((Date.now() - state.today.active.startedAt)/1000) + (state.today.active.elapsed||0);
   timerDisplay.textContent = formatHMS(secs);
 }
 function renderTimerUI(){
   if (!state.today.active){
-    setActiveLabel("No active task");
-    timerDisplay.textContent = "00:00:00";
-    return;
+    setActiveLabel("No active task"); timerDisplay.textContent = "00:00:00"; return;
   }
   const it = getItem(state.today.active.sectionId, state.today.active.itemId);
   setActiveLabel(it ? it.title : "Active task");
 }
 function setActiveLabel(txt){ activeTaskLabel.textContent = txt; }
 
-// ————— Import/Export/Reset —————
+// ————— Import/Export (state JSON) —————
 function onExport(){
   const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
@@ -340,14 +346,10 @@ function onImport(e){
     try{
       const imported = JSON.parse(reader.result);
       if (!imported.settings) imported.settings = state.settings;
-      state = imported;
-      persist(); renderAll();
+      state = imported; persist(); renderAll();
       alert("Import complete.");
-    }catch(err){
-      alert("Invalid JSON.");
-    }finally{
-      importFile.value = "";
-    }
+    }catch{ alert("Invalid JSON."); }
+    finally{ importFile.value = ""; }
   };
   reader.readAsText(file);
 }
@@ -355,6 +357,128 @@ function onReset(){
   if (!confirm("This resets ALL data. Continue?")) return;
   state = structuredClone(DEFAULT_DATA);
   persist(); renderAll();
+}
+
+// ————— Bulk Add (CSV/XLSX) —————
+function handleBulkFile(e){
+  const f = e.target.files?.[0]; if (!f) return;
+  const ext = f.name.split(".").pop().toLowerCase();
+  const reader = new FileReader();
+
+  if (ext === "csv") {
+    reader.onload = () => importCSV(reader.result);
+    reader.readAsText(f);
+  } else if (ext === "xlsx" || ext === "xls") {
+    if (window.XLSX){
+      reader.onload = () => {
+        const wb = XLSX.read(new Uint8Array(reader.result), {type:"array"});
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const csv = XLSX.utils.sheet_to_csv(sheet);
+        importCSV(csv);
+      };
+      reader.readAsArrayBuffer(f);
+    } else {
+      alert("XLSX not available offline. Please export your sheet as CSV or keep the XLSX script tag.");
+    }
+  } else {
+    alert("Please upload a .csv or .xlsx file.");
+  }
+  bulkFile.value = "";
+}
+function importCSV(csvText){
+  const rows = csvToObjects(csvText);
+  if (!rows.length){ alert("No rows found."); return; }
+
+  let added=0, updated=0, createdSections=0;
+  rows.forEach(r=>{
+    const obj = normalizeRow(r);
+    if (!obj.section || !obj.title) return;
+
+    let sec = state.sections.find(s => (s.title||"").trim() === obj.section);
+    if (!sec){
+      sec = { id: cryptoId(), title: obj.section, items: [] };
+      state.sections.push(sec); createdSections++;
+    }
+    const existing = sec.items.find(i => (i.title||"").trim() === obj.title);
+    if (existing){
+      existing.duration = obj.duration || existing.duration || "";
+      existing.notes = obj.notes ?? existing.notes ?? "";
+      updated++;
+    }else{
+      sec.items.push({
+        id: cryptoId(),
+        title: obj.title,
+        duration: obj.duration || "",
+        notes: obj.notes || "",
+        done: false
+      });
+      added++;
+    }
+  });
+
+  persist(); renderAll();
+  alert(`Bulk add complete.\nSections created: ${createdSections}\nItems added: ${added}\nItems updated: ${updated}`);
+}
+
+function csvToObjects(text){
+  const rows = csvToRows(text);
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => (h||"").trim().toLowerCase());
+  const out = [];
+  for (let i=1;i<rows.length;i++){
+    const row = rows[i];
+    if (row.every(c => (c||"").trim()==="")) continue;
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = (row[idx]||"").trim(); });
+    out.push(obj);
+  }
+  return out;
+}
+function csvToRows(str){
+  // Robust CSV parser: handles quotes, commas, newlines
+  const rows = [];
+  let cur = [], val = "", inQuotes = false;
+  const s = String(str).replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+  for (let i=0;i<s.length;i++){
+    const c = s[i], n = s[i+1];
+    if (c === '"' ){
+      if (inQuotes && n === '"'){ val += '"'; i++; } // escaped quote
+      else { inQuotes = !inQuotes; }
+    } else if (c === ',' && !inQuotes){
+      cur.push(val); val="";
+    } else if (c === '\n' && !inQuotes){
+      cur.push(val); rows.push(cur); cur=[], val="";
+    } else {
+      val += c;
+    }
+  }
+  cur.push(val); rows.push(cur);
+  return rows;
+}
+function normalizeRow(r){
+  // Accept a variety of header names
+  const g = (k)=> r[k] ?? r[k?.toLowerCase()] ?? "";
+  const byKeys = (keys)=> keys.map(k=>g(k)).find(v=>v!==undefined && v!=="") || "";
+  return {
+    section: byKeys(["section","sections"]),
+    title: byKeys(["title","item","name"]),
+    duration: byKeys(["duration","length","time"]),
+    notes: byKeys(["notes","note","comment"])
+  };
+}
+function downloadTemplateCSV(){
+  const sample =
+`Section,Title,Duration,Notes
+Bacteria — 01 Gram Positive Cocci,Staphylococcus aureus,11:03,
+Bacteria — 02 Gram Positive Bacilli,Clostridium difficile,08:17,watch with FA pg 135
+Custom — Add Anything (UW, Anki, Pathoma, FA),UWorld Micro Block 2,75:00,Timed
+`;
+  const blob = new Blob([sample], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "bulk-template.csv";
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
 // ————— Utilities —————
@@ -385,11 +509,7 @@ function formatHMS(secs){
 }
 function uncompletedItems(){
   const out = [];
-  state.sections.forEach(sec=>{
-    sec.items.forEach(it=>{
-      if (!it.done) out.push({sec, it});
-    });
-  });
+  state.sections.forEach(sec=>{ sec.items.forEach(it=>{ if (!it.done) out.push({sec, it}); }); });
   return out;
 }
 function totalPlannedMinutes(queue){
@@ -408,7 +528,6 @@ function totalDoneOverall(){
   return [done,total];
 }
 function calcStreak(){
-  const days = Object.keys(state.history || {});
   const today = todayISO();
   state.history[today] = Math.round((state.today.studiedSeconds||0)/60);
   persist();
@@ -422,3 +541,4 @@ function calcStreak(){
   }
   return streak;
 }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
