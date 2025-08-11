@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Step 1 Planner – Sketchy Micro + More</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- Optional XLSX support (works offline if you later download this file locally) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -19,11 +21,16 @@
       <label class="import">
         Import <input id="importFile" type="file" accept=".json" />
       </label>
+
+      <!-- NEW: bulk add controls -->
+      <button id="bulkBtn" title="Add many items from CSV/XLSX">Bulk Add</button>
+      <input id="bulkFile" type="file" accept=".csv,.xlsx,.xls" style="display:none" />
+      <button id="templateBtn" title="Download a CSV template">Template CSV</button>
+
       <button id="resetBtn" class="danger" title="Reset all progress">Reset</button>
     </div>
   </header>
 
-  <!-- NEW: Global progress bar -->
   <div class="global-progress-wrap">
     <div class="gp-left">
       <span class="muted">Overall Progress</span>
@@ -42,6 +49,9 @@
         <button id="addSectionBtn">+ Add Section</button>
       </div>
       <div id="sections"></div>
+      <div class="muted" style="padding:8px 4px 0">
+        Bulk format: Section, Title, Duration (mm:ss or hh:mm:ss), Notes
+      </div>
     </section>
 
     <aside class="panel">
