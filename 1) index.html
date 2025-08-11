@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Step 1 Planner – Sketchy Micro + More</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Step 1 Planner</h1>
+    <div class="controls">
+      <input id="search" type="search" placeholder="Search videos or tasks…" />
+      <label class="goal">
+        Daily goal (min):
+        <input id="dailyGoal" type="number" min="10" step="5" />
+      </label>
+      <button id="exportBtn" title="Export your data to JSON">Export</button>
+      <label class="import">
+        Import <input id="importFile" type="file" accept=".json" />
+      </label>
+      <button id="resetBtn" class="danger" title="Reset all progress">Reset</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Sections</h2>
+        <button id="addSectionBtn">+ Add Section</button>
+      </div>
+      <div id="sections"></div>
+    </section>
+
+    <aside class="panel">
+      <div class="panel-header">
+        <h2>Today Queue</h2>
+        <div class="muted" id="todayMeta"></div>
+      </div>
+
+      <div id="todayList" class="today-list"></div>
+
+      <div class="timer">
+        <div class="timer-row">
+          <span id="activeTaskLabel" class="muted">No active task</span>
+          <span id="timerDisplay" class="clock">00:00:00</span>
+        </div>
+        <div class="timer-row">
+          <button id="startTimerBtn">Start</button>
+          <button id="pauseTimerBtn">Pause</button>
+          <button id="stopTimerBtn">Stop</button>
+        </div>
+      </div>
+
+      <div class="panel-footer">
+        <button id="fillTodayBtn" title="Auto-fill queue up to your goal using uncompleted items">
+          Auto-fill up to goal
+        </button>
+        <button id="clearTodayBtn">Clear Today</button>
+      </div>
+
+      <div class="stats">
+        <div><strong>Overall Progress:</strong> <span id="overallPct">0%</span></div>
+        <div><strong>Studied today:</strong> <span id="studiedToday">0 min</span></div>
+        <div><strong>Streak:</strong> <span id="streakDays">0 days</span></div>
+      </div>
+    </aside>
+  </main>
+
+  <template id="sectionTmpl">
+    <details class="card" open>
+      <summary class="summary">
+        <div class="summary-left">
+          <span class="section-title"></span>
+          <span class="count muted"></span>
+        </div>
+        <div class="summary-right">
+          <div class="progress"><div class="bar"></div></div>
+          <button class="addItem">+ Add Item</button>
+          <button class="rename">Rename</button>
+          <button class="delete danger">Delete</button>
+        </div>
+      </summary>
+      <div class="items"></div>
+    </details>
+  </template>
+
+  <template id="itemTmpl">
+    <div class="item">
+      <input type="checkbox" class="done" />
+      <input type="text" class="title" />
+      <input type="text" class="duration" placeholder="mm:ss or hh:mm:ss" />
+      <input type="text" class="notes" placeholder="notes (optional)" />
+      <div class="row-buttons">
+        <button class="toToday" title="Add to Today Queue">To Today</button>
+        <button class="moveUp" title="Move up">↑</button>
+        <button class="moveDown" title="Move down">↓</button>
+        <button class="remove danger" title="Delete item">Delete</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="todayItemTmpl">
+    <div class="today-item">
+      <span class="ti-title"></span>
+      <span class="ti-duration muted"></span>
+      <div class="ti-buttons">
+        <button class="start">Start</button>
+        <button class="up">↑</button>
+        <button class="down">↓</button>
+        <button class="remove danger">Remove</button>
+      </div>
+    </div>
+  </template>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
