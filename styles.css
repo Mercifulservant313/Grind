@@ -28,8 +28,19 @@ h1{margin:0;font-size:22px}
 .controls .import input{display:none}
 .controls .import{border:1px dashed var(--border); padding:6px 10px; border-radius:8px; cursor:pointer}
 
+/* NEW: Global progress bar area */
+.global-progress-wrap{
+  display:grid; grid-template-columns:240px 1fr; gap:12px;
+  max-width:1150px; margin:12px auto 0; padding:0 16px;
+  align-items:center;
+}
+.gp-left{display:flex; gap:8px; align-items:baseline}
+.count-strong{font-weight:700}
+.count-muted{color:var(--muted)}
+.progress-wide{width:100%}
+
 .grid{
-  display:grid; grid-template-columns:2fr 1fr; gap:16px; max-width:1150px; margin:20px auto; padding:0 16px;
+  display:grid; grid-template-columns:2fr 1fr; gap:16px; max-width:1150px; margin:16px auto 20px; padding:0 16px;
 }
 .panel{
   background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px;
@@ -79,4 +90,5 @@ h1{margin:0;font-size:22px}
 
 @media (max-width: 980px){
   .grid{grid-template-columns:1fr}
+  .global-progress-wrap{grid-template-columns:1fr}
 }
