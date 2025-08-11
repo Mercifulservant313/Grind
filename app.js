@@ -1,4 +1,4 @@
-/* Step 1 Planner – Local, Offline, Collapsible, Trackable */
+/* Step 1 Planner – with TRT and Analytics */
 const LS_KEY = "step1_planner_state_v1";
 
 let state = loadState();
@@ -20,6 +20,7 @@ const timerDisplay = document.getElementById("timerDisplay");
 const startTimerBtn = document.getElementById("startTimerBtn");
 const pauseTimerBtn = document.getElementById("pauseTimerBtn");
 const stopTimerBtn = document.getElementById("stopTimerBtn");
+
 // Global progress
 const overallPctEl = document.getElementById("overallPct");
 const overallCountEl = document.getElementById("overallCount");
@@ -27,7 +28,14 @@ const overallBarEl = document.getElementById("overallBar");
 const studiedTodayEl = document.getElementById("studiedToday");
 const streakDaysEl = document.getElementById("streakDays");
 
-// NEW: bulk add controls
+// Analytics
+const totalDurationEl = document.getElementById("totalDuration");
+const watchedDurationEl = document.getElementById("watchedDuration");
+const pieChartEl = document.getElementById("pieChart");
+const pieCenterEl = document.getElementById("pieCenter");
+const legendEl = document.getElementById("legend");
+
+// Bulk controls
 const bulkBtn = document.getElementById("bulkBtn");
 const bulkFile = document.getElementById("bulkFile");
 const templateBtn = document.getElementById("templateBtn");
@@ -47,6 +55,9 @@ function loadState(){
   const raw = localStorage.getItem(LS_KEY);
   if (!raw){
     const starter = structuredClone(DEFAULT_DATA);
+    // default color map
+    starter.settings = starter.settings || {};
+    starter.settings.sectionColors = {};
     persist(starter);
     return starter;
   }
@@ -55,10 +66,14 @@ function loadState(){
     if (!parsed.today || parsed.today.date !== todayISO()){
       parsed.today = { date: todayISO(), queue: [], active: null, studiedSeconds: 0 };
     }
-    parsed.settings = parsed.settings || { dailyGoalMinutes: 120 };
+    parsed.settings = parsed.settings || {};
+    parsed.settings.dailyGoalMinutes ??= 120;
+    parsed.settings.sectionColors ??= {};
     return parsed;
   }catch{
     const starter = structuredClone(DEFAULT_DATA);
+    starter.settings = starter.settings || {};
+    starter.settings.sectionColors = {};
     persist(starter);
     return starter;
   }
@@ -70,6 +85,7 @@ function renderAll(){
   renderSections();
   renderToday();
   renderStats();
+  renderAnalytics();
 }
 
 function renderSections(){
@@ -84,12 +100,15 @@ function renderSections(){
     titleEl.textContent = sec.title;
 
     const visibleItems = sec.items.filter(it => matchesQuery(it, q));
-    countEl.textContent = `${visibleItems.length}/${sec.items.length} shown`;
 
-    // section progress
+    // Section totals
+    const secTotalSecs = sumSectionTotalSeconds(sec);
     const doneCount = sec.items.filter(i => i.done).length;
     const pct = sec.items.length ? Math.round(100*doneCount/sec.items.length) : 0;
     progressEl.style.width = pct + "%";
+
+    // count: X/Y shown • TRT H:MM
+    countEl.textContent = `${visibleItems.length}/${sec.items.length} shown • TRT ${formatHM(secTotalSecs)}`;
 
     // header actions
     el.querySelector(".addItem").addEventListener("click", () => addItem(sec.id));
@@ -115,7 +134,7 @@ function renderSections(){
         persist(); renderAll();
       });
       titleIn.addEventListener("input", () => { it.title = titleIn.value; persist(); });
-      durIn.addEventListener("input", () => { it.duration = durIn.value; persist(); renderTodayMeta(); });
+      durIn.addEventListener("input", () => { it.duration = durIn.value; persist(); renderAll(); });
       notesIn.addEventListener("input", () => { it.notes = notesIn.value; persist(); });
 
       row.querySelector(".toToday").addEventListener("click", () => addToToday(sec.id, it.id));
@@ -150,11 +169,13 @@ function renderToday(){
   renderTodayMeta();
   renderTimerUI();
 }
+
 function renderTodayMeta(){
   const goal = Number(state.settings.dailyGoalMinutes || 0);
   const planned = totalPlannedMinutes(state.today.queue);
   todayMetaEl.textContent = `Planned: ${planned} min  |  Goal: ${goal} min`;
 }
+
 function renderStats(){
   const [done, total] = totalDoneOverall();
   const pct = total ? Math.round(100*done/total) : 0;
@@ -167,7 +188,130 @@ function renderStats(){
   streakDaysEl.textContent = `${calcStreak()} days`;
 }
 
-// ————— Events —————
+/* ---------- Analytics: TRT + Pie ---------- */
+function renderAnalytics(){
+  const totals = computeTotals();
+  totalDurationEl.textContent = formatHM(totals.totalSecs);
+  watchedDurationEl.textContent = formatHM(totals.watchedSecs);
+
+  const pct = totals.totalSecs ? Math.round(100*totals.watchedSecs/totals.totalSecs) : 0;
+  pieCenterEl.textContent = `${pct}%`;
+
+  // Build slices: one per section (watched only) + remaining
+  const slices = [];
+  totals.perSection.forEach(s=>{
+    if (s.watchedSecs > 0){
+      slices.push({
+        label: s.title,
+        seconds: s.watchedSecs,
+        color: getSectionColor(s.id, s.title)
+      });
+    }
+  });
+  const remaining = Math.max(0, totals.totalSecs - totals.watchedSecs);
+  if (remaining > 0){
+    slices.push({ label: "Remaining", seconds: remaining, color: "#334155" }); // slate
+  }
+
+  drawDonut(pieChartEl, slices);
+
+  // Legend with color pickers for sections
+  legendEl.innerHTML = "";
+  totals.perSection.forEach(s=>{
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = getSectionColor(s.id, s.title);
+    input.addEventListener("input", (e)=>{
+      setSectionColor(s.id, e.target.value);
+      renderAnalytics();
+    });
+    const label = document.createElement("span");
+    label.textContent = `${s.title} — ${formatHM(s.watchedSecs)} / ${formatHM(s.totalSecs)}`;
+    row.appendChild(input);
+    row.appendChild(label);
+    legendEl.appendChild(row);
+  });
+}
+
+function computeTotals(){
+  let totalSecs = 0, watchedSecs = 0;
+  const perSection = state.sections.map(sec=>{
+    const total = sumSectionTotalSeconds(sec);
+    const watched = sumSectionWatchedSeconds(sec);
+    totalSecs += total; watchedSecs += watched;
+    return { id: sec.id, title: sec.title, totalSecs: total, watchedSecs: watched };
+  });
+  return { totalSecs, watchedSecs, perSection };
+}
+
+// Simple donut chart (SVG paths)
+function drawDonut(svg, slices){
+  const size = 220, cx=110, cy=110, r=100; // outer radius
+  const innerR = 62; // donut hole size
+  const total = slices.reduce((a,b)=>a+b.seconds,0) || 1;
+
+  // clear
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  let angle = -Math.PI/2; // start at top
+  slices.forEach(s=>{
+    const frac = s.seconds / total;
+    const end = angle + frac * Math.PI * 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", donutSlicePath(cx, cy, r, innerR, angle, end));
+    path.setAttribute("fill", s.color);
+    svg.appendChild(path);
+    angle = end;
+  });
+
+  function donutSlicePath(cx, cy, R, r, a0, a1){
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    const x0 = cx + R*Math.cos(a0), y0 = cy + R*Math.sin(a0);
+    const x1 = cx + R*Math.cos(a1), y1 = cy + R*Math.sin(a1);
+    const x2 = cx + r*Math.cos(a1), y2 = cy + r*Math.sin(a1);
+    const x3 = cx + r*Math.cos(a0), y3 = cy + r*Math.sin(a0);
+    return [
+      `M ${x0} ${y0}`,
+      `A ${R} ${R} 0 ${large} 1 ${x1} ${y1}`,
+      `L ${x2} ${y2}`,
+      `A ${r} ${r} 0 ${large} 0 ${x3} ${y3}`,
+      "Z"
+    ].join(" ");
+  }
+}
+
+function getSectionColor(id, title){
+  const map = state.settings.sectionColors || {};
+  if (map[id]) return map[id];
+  // Assign a default color from palette if missing
+  const palette = ["#ef4444","#22c55e","#06b6d4","#f59e0b","#a855f7","#14b8a6","#e11d48","#84cc16","#3b82f6","#f97316"];
+  const idx = Math.abs(hash(title)) % palette.length;
+  const color = palette[idx];
+  setSectionColor(id, color);
+  return color;
+}
+function setSectionColor(id, color){
+  state.settings.sectionColors = state.settings.sectionColors || {};
+  state.settings.sectionColors[id] = color;
+  persist();
+}
+function hash(str){ let h=0; for (let i=0;i<str.length;i++){ h=((h<<5)-h)+str.charCodeAt(i); h|=0; } return h; }
+
+/* ---------- Today Queue ---------- */
+function renderTimerUI(){
+  if (!state.today.active){
+    setActiveLabel("No active task");
+    timerDisplay.textContent = "00:00:00";
+    return;
+  }
+  const it = getItem(state.today.active.sectionId, state.today.active.itemId);
+  setActiveLabel(it ? it.title : "Active task");
+}
+function setActiveLabel(txt){ activeTaskLabel.textContent = txt; }
+
+/* ---------- Events ---------- */
 function setupEvents(){
   searchEl.addEventListener("input", () => renderSections());
   dailyGoalEl.addEventListener("input", () => {
@@ -194,14 +338,17 @@ function setupEvents(){
   stopTimerBtn.addEventListener("click", stopTimer);
 
   // Bulk add
+  const bulkBtn = document.getElementById("bulkBtn");
+  const bulkFile = document.getElementById("bulkFile");
+  const templateBtn = document.getElementById("templateBtn");
   bulkBtn.addEventListener("click", () => bulkFile.click());
   bulkFile.addEventListener("change", handleBulkFile);
   templateBtn.addEventListener("click", downloadTemplateCSV);
 }
 
-// ————— Sections/Items CRUD —————
+/* ---------- Sections/Items CRUD ---------- */
 function addSection(){
-  const title = prompt("Section name (eg, Sketchy Micro – Parasites):");
+  const title = prompt("Section name (eg, Pathoma — Chapter 4):");
   if (!title) return;
   state.sections.push({ id: cryptoId(), title, items: [] });
   persist(); renderAll();
@@ -210,7 +357,7 @@ function renameSection(secId){
   const sec = findSection(secId); if (!sec) return;
   const title = prompt("Rename section:", sec.title);
   if (!title) return;
-  sec.title = title; persist(); renderSections();
+  sec.title = title; persist(); renderAll();
 }
 function deleteSection(secId){
   if (!confirm("Delete this section and all its items?")) return;
@@ -224,7 +371,7 @@ function addItem(secId){
   const title = prompt("Item title:");
   if (!title) return;
   sec.items.push({ id: cryptoId(), title, duration: "", notes: "", done: false });
-  persist(); renderSections();
+  persist(); renderAll();
 }
 function deleteItem(secId, itemId){
   const sec = findSection(secId); if (!sec) return;
@@ -239,10 +386,10 @@ function moveItem(secId, itemId, dir){
   const j = idx + dir;
   if (j<0 || j>=sec.items.length) return;
   [sec.items[idx], sec.items[j]] = [sec.items[j], sec.items[idx]];
-  persist(); renderSections();
+  persist(); renderAll();
 }
 
-// ————— Today Queue —————
+/* ---------- Today Queue ---------- */
 function addToToday(sectionId, itemId){
   const sec = findSection(sectionId); if (!sec) return;
   const it = sec.items.find(i=>i.id===itemId); if (!it || it.done) return;
@@ -285,13 +432,12 @@ function autoFillToday(){
   persist(); renderToday();
 }
 
-// ————— Timer —————
+/* ---------- Timer ---------- */
 function startTimer(sectionId, itemId){
   const sec = findSection(sectionId); if (!sec) return;
   const it = sec.items.find(x=>x.id===itemId); if (!it) return;
   state.today.active = { sectionId, itemId, startedAt: Date.now(), elapsed: 0 };
-  persist(); renderTimerUI();
-  setActiveLabel(it.title);
+  persist(); renderTimerUI(); setActiveLabel(it.title);
 }
 function pauseTimer(){
   if (!state.today.active) return;
@@ -321,16 +467,8 @@ function tickTimer(){
   const secs = Math.floor((Date.now() - state.today.active.startedAt)/1000) + (state.today.active.elapsed||0);
   timerDisplay.textContent = formatHMS(secs);
 }
-function renderTimerUI(){
-  if (!state.today.active){
-    setActiveLabel("No active task"); timerDisplay.textContent = "00:00:00"; return;
-  }
-  const it = getItem(state.today.active.sectionId, state.today.active.itemId);
-  setActiveLabel(it ? it.title : "Active task");
-}
-function setActiveLabel(txt){ activeTaskLabel.textContent = txt; }
 
-// ————— Import/Export (state JSON) —————
+/* ---------- Import/Export & Bulk ---------- */
 function onExport(){
   const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
@@ -359,7 +497,6 @@ function onReset(){
   persist(); renderAll();
 }
 
-// ————— Bulk Add (CSV/XLSX) —————
 function handleBulkFile(e){
   const f = e.target.files?.[0]; if (!f) return;
   const ext = f.name.split(".").pop().toLowerCase();
@@ -377,12 +514,8 @@ function handleBulkFile(e){
         importCSV(csv);
       };
       reader.readAsArrayBuffer(f);
-    } else {
-      alert("XLSX not available offline. Please export your sheet as CSV or keep the XLSX script tag.");
-    }
-  } else {
-    alert("Please upload a .csv or .xlsx file.");
-  }
+    } else { alert("XLSX script not loaded. Save as CSV or keep the XLSX script tag."); }
+  } else { alert("Please upload a .csv or .xlsx file."); }
   bulkFile.value = "";
 }
 function importCSV(csvText){
@@ -395,7 +528,7 @@ function importCSV(csvText){
     if (!obj.section || !obj.title) return;
 
     let sec = state.sections.find(s => (s.title||"").trim() === obj.section);
-    if (!sec){
+    if (sec == null){
       sec = { id: cryptoId(), title: obj.section, items: [] };
       state.sections.push(sec); createdSections++;
     }
@@ -406,11 +539,8 @@ function importCSV(csvText){
       updated++;
     }else{
       sec.items.push({
-        id: cryptoId(),
-        title: obj.title,
-        duration: obj.duration || "",
-        notes: obj.notes || "",
-        done: false
+        id: cryptoId(), title: obj.title,
+        duration: obj.duration || "", notes: obj.notes || "", done: false
       });
       added++;
     }
@@ -419,7 +549,6 @@ function importCSV(csvText){
   persist(); renderAll();
   alert(`Bulk add complete.\nSections created: ${createdSections}\nItems added: ${added}\nItems updated: ${updated}`);
 }
-
 function csvToObjects(text){
   const rows = csvToRows(text);
   if (!rows.length) return [];
@@ -435,28 +564,24 @@ function csvToObjects(text){
   return out;
 }
 function csvToRows(str){
-  // Robust CSV parser: handles quotes, commas, newlines
   const rows = [];
   let cur = [], val = "", inQuotes = false;
   const s = String(str).replace(/\r\n/g,"\n").replace(/\r/g,"\n");
   for (let i=0;i<s.length;i++){
     const c = s[i], n = s[i+1];
     if (c === '"' ){
-      if (inQuotes && n === '"'){ val += '"'; i++; } // escaped quote
+      if (inQuotes && n === '"'){ val += '"'; i++; }
       else { inQuotes = !inQuotes; }
     } else if (c === ',' && !inQuotes){
       cur.push(val); val="";
     } else if (c === '\n' && !inQuotes){
       cur.push(val); rows.push(cur); cur=[], val="";
-    } else {
-      val += c;
-    }
+    } else { val += c; }
   }
   cur.push(val); rows.push(cur);
   return rows;
 }
 function normalizeRow(r){
-  // Accept a variety of header names
   const g = (k)=> r[k] ?? r[k?.toLowerCase()] ?? "";
   const byKeys = (keys)=> keys.map(k=>g(k)).find(v=>v!==undefined && v!=="") || "";
   return {
@@ -469,9 +594,8 @@ function normalizeRow(r){
 function downloadTemplateCSV(){
   const sample =
 `Section,Title,Duration,Notes
-Bacteria — 01 Gram Positive Cocci,Staphylococcus aureus,11:03,
-Bacteria — 02 Gram Positive Bacilli,Clostridium difficile,08:17,watch with FA pg 135
-Custom — Add Anything (UW, Anki, Pathoma, FA),UWorld Micro Block 2,75:00,Timed
+Pathoma — Chapters 1–3,1.1 Growth Adaptations,,
+Pathoma — Chapters 1–3,1.2 Cellular Injury,,
 `;
   const blob = new Blob([sample], {type:"text/csv"});
   const url = URL.createObjectURL(blob);
@@ -481,7 +605,7 @@ Custom — Add Anything (UW, Anki, Pathoma, FA),UWorld Micro Block 2,75:00,Timed
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
-// ————— Utilities —————
+/* ---------- Helpers ---------- */
 function findSection(id){ return state.sections.find(s => s.id === id); }
 function getItem(sectionId, itemId){
   const sec = findSection(sectionId); if (!sec) return null;
@@ -500,12 +624,32 @@ function asMinutes(hms){
   if (parts.length===1){ return Number(parts[0])||0; }
   return 0;
 }
+function toSeconds(hms){
+  if (!hms) return 0;
+  const parts = hms.split(":").map(Number);
+  if (parts.some(isNaN)) return 0;
+  if (parts.length===3){ const [h,m,s]=parts; return h*3600 + m*60 + s }
+  if (parts.length===2){ const [m,s]=parts; return m*60 + s }
+  if (parts.length===1){ return Number(parts[0])*60 || 0; }
+  return 0;
+}
 function formatHMS(secs){
   const h = Math.floor(secs/3600);
   const m = Math.floor((secs%3600)/60);
   const s = secs%60;
   const pad = n => String(n).padStart(2,"0");
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+function formatHM(secs){
+  const h = Math.floor(secs/3600);
+  const m = Math.floor((secs%3600)/60);
+  return h ? `${h}h ${String(m).padStart(2,"0")}m` : `${m}m`;
+}
+function sumSectionTotalSeconds(sec){
+  return sec.items.reduce((sum,it)=> sum + toSeconds(it.duration || "0"), 0);
+}
+function sumSectionWatchedSeconds(sec){
+  return sec.items.reduce((sum,it)=> sum + (it.done ? toSeconds(it.duration||"0") : 0), 0);
 }
 function uncompletedItems(){
   const out = [];
@@ -542,3 +686,7 @@ function calcStreak(){
   return streak;
 }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
+function cryptoId(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'id-' + Math.random().toString(36).slice(2, 10);
+}
