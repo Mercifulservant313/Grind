@@ -23,6 +23,18 @@
     </div>
   </header>
 
+  <!-- NEW: Global progress bar -->
+  <div class="global-progress-wrap">
+    <div class="gp-left">
+      <span class="muted">Overall Progress</span>
+      <span id="overallCount" class="count-strong">0/0</span>
+      <span id="overallPct" class="count-muted">0%</span>
+    </div>
+    <div class="progress progress-wide">
+      <div id="overallBar" class="bar"></div>
+    </div>
+  </div>
+
   <main class="grid">
     <section class="panel">
       <div class="panel-header">
@@ -60,7 +72,6 @@
       </div>
 
       <div class="stats">
-        <div><strong>Overall Progress:</strong> <span id="overallPct">0%</span></div>
         <div><strong>Studied today:</strong> <span id="studiedToday">0 min</span></div>
         <div><strong>Streak:</strong> <span id="streakDays">0 days</span></div>
       </div>
