@@ -3,16 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Step 1 Planner – Sketchy Micro + More</title>
+  <title>Goal Grinder</title>
   <link rel="stylesheet" href="styles.css" />
   <!-- XLSX optional for bulk .xlsx uploads -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
-<body>
+<body class="theme-dark">
+  <!-- Left tools: theme + width -->
+  <aside class="sidepanel" aria-label="Appearance">
+    <div class="sidepanel-title">Appearance</div>
+    <label class="sidepanel-row">
+      <span>Theme</span>
+      <select id="themeSelect">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="sepia">Sepia</option>
+        <option value="forest">Forest</option>
+        <option value="rose">Rose</option>
+      </select>
+    </label>
+    <label class="sidepanel-row">
+      <span>Width</span>
+      <select id="widthSelect" title="Content width">
+        <option value="1150">Default</option>
+        <option value="1400" selected>Wide</option>
+        <option value="1600">Ultra</option>
+        <option value="9999">Full</option>
+      </select>
+    </label>
+  </aside>
+
   <header class="topbar">
-    <h1>Step 1 Planner</h1>
+    <h1>Goal Grinder</h1>
     <div class="controls">
-      <input id="search" type="search" placeholder="Search videos or tasks…" />
+      <input id="search" type="search" placeholder="Search videos or task…" />
       <label class="goal">
         Daily goal (min):
         <input id="dailyGoal" type="number" min="10" step="5" />
@@ -41,7 +65,7 @@
   </div>
 
   <main class="grid">
-    <!-- NEW: Analytics panel (left column) -->
+    <!-- Analytics -->
     <section class="panel" id="analyticsPanel">
       <div class="panel-header">
         <h2>Analytics</h2>
@@ -61,7 +85,7 @@
       </div>
     </section>
 
-    <!-- Sections panel (left column, below Analytics) -->
+    <!-- Sections -->
     <section class="panel">
       <div class="panel-header">
         <h2>Sections</h2>
@@ -73,7 +97,7 @@
       </div>
     </section>
 
-    <!-- Right column -->
+    <!-- Today Queue -->
     <aside class="panel">
       <div class="panel-header">
         <h2>Today Queue</h2>
@@ -113,7 +137,6 @@
       <summary class="summary">
         <div class="summary-left">
           <span class="section-title"></span>
-          <!-- count shows “X/Y shown • TRT H:MM” -->
           <span class="count muted"></span>
         </div>
         <div class="summary-right">
