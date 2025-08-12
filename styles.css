@@ -40,6 +40,7 @@ body{
 }
 h1{margin:0;font-size:22px}
 .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.controls .spacer{width:8px}
 .controls input[type="search"], .controls input[type="number"]{
   background:#0f172a10; color:var(--text); border:1px solid var(--border);
   border-radius:8px; padding:8px 10px;
@@ -75,6 +76,7 @@ h1{margin:0;font-size:22px}
   background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px;
 }
 .panel-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px}
+.panel-header-right{display:flex; gap:8px; align-items:center}
 .panel-footer{display:flex; gap:8px; margin-top:10px}
 .muted{color:var(--muted)}
 .card{
@@ -90,6 +92,9 @@ h1{margin:0;font-size:22px}
 .progress{width:150px; height:8px; background:#0b122520; border-radius:99px; border:1px solid var(--border); overflow:hidden}
 .progress .bar{height:100%; width:0%; background:linear-gradient(90deg,#16a34a,var(--accent))}
 .items{padding:10px 12px 12px}
+
+/* Nested subsections */
+.children{padding:4px 0 0 18px; margin-left:10px; border-left:1px dashed var(--border)}
 
 .item{
   display:grid; grid-template-columns:auto 1fr 110px 1fr auto; gap:8px; align-items:center;
