@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Goal Grinder</title>
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
   <!-- Optional: enables XLSX uploads for Bulk Add (keep if you use .xlsx) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -52,6 +52,9 @@
       <input id="bulkFile" type="file" accept=".csv,.xlsx,.xls" style="display:none" />
       <button id="templateBtn" title="Download a CSV template">Template CSV</button>
       <button id="resetBtn" class="danger" title="Reset all progress">Reset</button>
+      <span class="spacer"></span>
+      <button id="undoBtn" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <button id="redoBtn" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
     </div>
   </header>
 
@@ -93,7 +96,11 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Sections</h2>
-        <button id="addSectionBtn">+ Add Section</button>
+        <div class="panel-header-right">
+          <button id="collapseAllBtn" title="Collapse all sections">Collapse All</button>
+          <button id="expandAllBtn" title="Expand all sections">Expand All</button>
+          <button id="addSectionBtn">+ Add Section</button>
+        </div>
       </div>
       <div id="sections"></div>
       <div class="muted" style="padding:8px 4px 0">
@@ -147,12 +154,16 @@
         </div>
         <div class="summary-right">
           <div class="progress"><div class="bar"></div></div>
+          <button class="addChild" title="Add a nested subsection">+ Subsection</button>
+          <button class="indent" title="Indent (make child of previous)">▶</button>
+          <button class="outdent" title="Outdent (promote up one level)">◀</button>
           <button class="addItem">+ Add Item</button>
           <button class="rename">Rename</button>
           <button class="delete danger">Delete</button>
         </div>
       </summary>
       <div class="items"></div>
+      <div class="children"></div>
     </details>
   </template>
 
@@ -185,7 +196,7 @@
   </template>
 
   <!-- Scripts (cache-busted) -->
-  <script src="data.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="data.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
