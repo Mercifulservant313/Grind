@@ -1,3 +1,13 @@
+// cryptoId shim for data.js (runs before app.js)
+if (typeof cryptoId !== 'function'){
+  var cryptoId = (function(){
+    try{
+      if (window.crypto && window.crypto.randomUUID) return function(){ return window.crypto.randomUUID(); };
+    }catch(e){}
+    return function(){ return 'id-' + Math.random().toString(36).slice(2,10); };
+  })();
+}
+
 // Full Sketchy Micro list (from your image) + editable durations.
 // If a few timestamps look off, tweak inline; it autosaves.
 
