@@ -1,10 +1,36 @@
-/* Goal Grinder – themes + width + analytics + bulk CSV/XLSX */
-const LS_KEY   = "step1_planner_state_v1";
+/* Goal Grinder – hierarchy + collapsible + undo/redo + themes + width + analytics + bulk CSV/XLSX */
+const LS_KEY    = "step1_planner_state_v1";
 const THEME_KEY = "gg_theme";
 const WIDTH_KEY = "gg_container";
-const SIDEPANEL_KEY = "gg_sidepanel_hidden";
 
 let state = loadState();
+
+/* -------- Undo / Redo -------- */
+const UNDO_MAX = 80;
+let undoStack = [];
+let redoStack = [];
+let selectedSectionId = null;
+function pushUndo(){
+  try{ undoStack.push(JSON.stringify(state)); if (undoStack.length>UNDO_MAX) undoStack.shift(); redoStack.length = 0; }catch{}
+}
+function onUndo(){
+  if (!undoStack.length) return;
+  try{
+    redoStack.push(JSON.stringify(state));
+    state = JSON.parse(undoStack.pop());
+    persist(state, {noHistory:true});
+    renderAll();
+  }catch{}
+}
+function onRedo(){
+  if (!redoStack.length) return;
+  try{
+    undoStack.push(JSON.stringify(state));
+    state = JSON.parse(redoStack.pop());
+    persist(state, {noHistory:true});
+    renderAll();
+  }catch{}
+}
 
 /* -------- DOM -------- */
 const sectionsEl = document.getElementById("sections");
@@ -23,6 +49,10 @@ const timerDisplay = document.getElementById("timerDisplay");
 const startTimerBtn = document.getElementById("startTimerBtn");
 const pauseTimerBtn = document.getElementById("pauseTimerBtn");
 const stopTimerBtn = document.getElementById("stopTimerBtn");
+const undoBtn = document.getElementById("undoBtn");
+const redoBtn = document.getElementById("redoBtn");
+const collapseAllBtn = document.getElementById("collapseAllBtn");
+const expandAllBtn = document.getElementById("expandAllBtn");
 
 /* Global progress */
 const overallPctEl = document.getElementById("overallPct");
@@ -55,6 +85,7 @@ const todayItemTmpl = document.getElementById("todayItemTmpl");
 /* -------- Init -------- */
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
 applyContainerWidth(parseInt(localStorage.getItem(WIDTH_KEY) || "1400", 10));
+migrateToNestedModel();
 renderAll();
 setupEvents();
 tickTimer(); setInterval(tickTimer, 1000);
@@ -63,12 +94,12 @@ tickTimer(); setInterval(tickTimer, 1000);
 function loadState(){
   const raw = localStorage.getItem(LS_KEY);
   if (!raw){
-    const fallback = { settings:{dailyGoalMinutes:120, sectionColors:{}, collapsed:{}}, sections:[], today:{ date: new Date().toISOString().slice(0,10), queue: [], active: null, studiedSeconds:0 }, history:{} };
-    const starter = structuredClone(typeof DEFAULT_DATA !== 'undefined' ? DEFAULT_DATA : fallback);
+    const starter = structuredClone(DEFAULT_DATA);
     starter.settings = starter.settings || {};
     starter.settings.dailyGoalMinutes ??= 120;
     starter.settings.sectionColors ??= {};
-    persist(starter);
+    starter.settings.collapsed ??= {};
+    persist(starter, {noHistory:true});
     return starter;
   }
   try{
@@ -79,16 +110,21 @@ function loadState(){
     s.settings = s.settings || {};
     s.settings.dailyGoalMinutes ??= 120;
     s.settings.sectionColors ??= {};
+    s.settings.collapsed ??= {};
     return s;
   }catch{
     const starter = structuredClone(DEFAULT_DATA);
     starter.settings = starter.settings || {};
     starter.settings.sectionColors = {};
-    persist(starter);
+    starter.settings.collapsed = {};
+    persist(starter, {noHistory:true});
     return starter;
   }
 }
-function persist(s=state){ localStorage.setItem(LS_KEY, JSON.stringify(s)); }
+function persist(s=state, opts={}){
+  if (!opts.noHistory) pushUndo();
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
+}
 
 function renderAll(){
   dailyGoalEl.value = state.settings.dailyGoalMinutes ?? 120;
@@ -98,57 +134,89 @@ function renderAll(){
   renderAnalytics();
 }
 
-/* -------- Sections (with TRT) -------- */
+/* -------- Sections (hierarchical) -------- */
 function renderSections(){
   sectionsEl.innerHTML = "";
   const q = (searchEl.value || "").trim().toLowerCase();
-  state.sections.forEach(sec=>{
-    const el = sectionTmpl.content.firstElementChild.cloneNode(true);
-  addDnDHandlers(el, sec);
-    const titleEl = el.querySelector(".section-title");
-    const countEl = el.querySelector(".count");
-    const progressEl = el.querySelector(".progress .bar");
-    const itemsWrap = el.querySelector(".items");
-    titleEl.textContent = sec.title;
-
-    const visibleItems = sec.items.filter(it => matchesQuery(it, q));
-    const secTotalSecs = sumSectionTotalSeconds(sec);
-    const doneCount = sec.items.filter(i=>i.done).length;
-    const pct = sec.items.length ? Math.round(100*doneCount/sec.items.length) : 0;
-    progressEl.style.width = pct + "%";
-    countEl.textContent = `${visibleItems.length}/${sec.items.length} shown • TRT ${formatHM(secTotalSecs)}`;
-
-    el.querySelector(".addItem").addEventListener("click", () => addItem(sec.id));
-    el.querySelector(".rename").addEventListener("click", () => renameSection(sec.id));
-    el.querySelector(".delete").addEventListener("click", () => deleteSection(sec.id));
-
-    visibleItems.forEach(it=>{
-      const row = itemTmpl.content.firstElementChild.cloneNode(true);
-      const doneEl = row.querySelector(".done");
-      const titleIn = row.querySelector(".title");
-      const durIn = row.querySelector(".duration");
-      const notesIn = row.querySelector(".notes");
-
-      doneEl.checked = !!it.done;
-      titleIn.value = it.title || "";
-      durIn.value = it.duration || "";
-      notesIn.value = it.notes || "";
-
-      doneEl.addEventListener("change", ()=>{ it.done = doneEl.checked; removeFromToday(sec.id, it.id, false); persist(); renderAll(); });
-      titleIn.addEventListener("input", ()=>{ it.title = titleIn.value; persist(); });
-      durIn.addEventListener("input", ()=>{ it.duration = durIn.value; persist(); renderAll(); });
-      notesIn.addEventListener("input", ()=>{ it.notes = notesIn.value; persist(); });
-
-      row.querySelector(".toToday").addEventListener("click", ()=> addToToday(sec.id, it.id));
-      row.querySelector(".remove").addEventListener("click", ()=> deleteItem(sec.id, it.id));
-      row.querySelector(".moveUp").addEventListener("click", ()=> moveItem(sec.id, it.id, -1));
-      row.querySelector(".moveDown").addEventListener("click", ()=> moveItem(sec.id, it.id, +1));
-
-      itemsWrap.appendChild(row);
-    });
-
-    sectionsEl.appendChild(el);
+  state.sections.forEach(sec => {
+    sectionsEl.appendChild(renderSection(sec, 0, q));
   });
+}
+function renderSection(sec, depth, q){
+  const el = sectionTmpl.content.firstElementChild.cloneNode(true);
+  const detailsEl = el; // <details>
+  detailsEl.dataset.secId = sec.id;
+  const summaryEl = el.querySelector('summary');
+  summaryEl.addEventListener('click', (e)=>{
+    selectedSectionId = sec.id;
+    // simple visual focus by outlining the card briefly
+    el.style.boxShadow = '0 0 0 2px var(--accent)';
+    setTimeout(()=>{ el.style.boxShadow=''; }, 150);
+  });
+
+  const titleEl = el.querySelector(".section-title");
+  const countEl = el.querySelector(".count");
+  const progressEl = el.querySelector(".progress .bar");
+  const itemsWrap = el.querySelector(".items");
+  const childrenWrap = el.querySelector(".children");
+
+  titleEl.textContent = sec.title;
+
+  // Items visible given search
+  const items = sec.items || [];
+  const visibleItems = items.filter(it => matchesQuery(it, q));
+  const secTotalSecs = sumSectionTotalSecondsDeep(sec);
+  const [doneCount, totalCount] = countDoneTotalDeep(sec);
+  const pct = totalCount ? Math.round(100*doneCount/totalCount) : 0;
+  progressEl.style.width = pct + "%";
+  countEl.textContent = `${visibleItems.length}/${items.length} shown • TRT ${formatHM(secTotalSecs)}`;
+
+  // Bind per-section controls
+  el.querySelector(".addItem").addEventListener("click", () => addItem(sec.id));
+  el.querySelector(".rename").addEventListener("click", () => renameSection(sec.id));
+  el.querySelector(".delete").addEventListener("click", () => deleteSection(sec.id));
+  el.querySelector(".addChild").addEventListener("click", () => addSubsection(sec.id));
+  el.querySelector(".indent").addEventListener("click", () => indentSection(sec.id));
+  el.querySelector(".outdent").addEventListener("click", () => outdentSection(sec.id));
+
+  // Persist collapsed state
+  detailsEl.open = !isCollapsed(sec.id);
+  detailsEl.addEventListener("toggle", () => {
+    setCollapsed(sec.id, !detailsEl.open);
+  });
+
+  // Render items
+  visibleItems.forEach(it=>{
+    const row = itemTmpl.content.firstElementChild.cloneNode(true);
+    const doneEl = row.querySelector(".done");
+    const titleIn = row.querySelector(".title");
+    const durIn = row.querySelector(".duration");
+    const notesIn = row.querySelector(".notes");
+
+    doneEl.checked = !!it.done;
+    titleIn.value = it.title || "";
+    durIn.value = it.duration || "";
+    notesIn.value = it.notes || "";
+
+    doneEl.addEventListener("change", ()=>{ pushUndo(); it.done = doneEl.checked; removeFromToday(sec.id, it.id, false); persist(); renderAll(); });
+    titleIn.addEventListener("input", ()=>{ it.title = titleIn.value; persist(undefined,{noHistory:true}); });
+    durIn.addEventListener("input", ()=>{ it.duration = durIn.value; persist(undefined,{noHistory:true}); renderAll(); });
+    notesIn.addEventListener("input", ()=>{ it.notes = notesIn.value; persist(undefined,{noHistory:true}); });
+
+    row.querySelector(".toToday").addEventListener("click", ()=> addToToday(sec.id, it.id));
+    row.querySelector(".remove").addEventListener("click", ()=> deleteItem(sec.id, it.id));
+    row.querySelector(".moveUp").addEventListener("click", ()=> moveItem(sec.id, it.id, -1));
+    row.querySelector(".moveDown").addEventListener("click", ()=> moveItem(sec.id, it.id, +1));
+
+    itemsWrap.appendChild(row);
+  });
+
+  // Render children
+  (sec.children||[]).forEach(child => {
+    childrenWrap.appendChild(renderSection(child, depth+1, q));
+  });
+
+  return el;
 }
 
 /* -------- Today -------- */
@@ -156,7 +224,7 @@ function renderToday(){
   todayListEl.innerHTML = "";
   state.today.queue.forEach((q, idx)=>{
     const sec = findSection(q.sectionId); if (!sec) return;
-    const it = sec.items.find(x=>x.id===q.itemId); if (!it) return;
+    const it = (sec.items||[]).find(x=>x.id===q.itemId); if (!it) return;
     const row = todayItemTmpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ti-title").textContent = it.title;
     row.querySelector(".ti-duration").textContent = it.duration || "--:--";
@@ -177,7 +245,7 @@ function renderTodayMeta(){
 
 /* -------- Stats -------- */
 function renderStats(){
-  const [done,total] = totalDoneOverall();
+  const [done,total] = totalDoneOverallDeep();
   const pct = total ? Math.round(100*done/total) : 0;
   overallPctEl.textContent = pct + "%";
   overallCountEl.textContent = `${done}/${total}`;
@@ -196,7 +264,7 @@ function renderAnalytics(){
   pieCenterEl.textContent = `${pct}%`;
 
   const slices = [];
-  totals.perSection.forEach(s=>{
+  totals.perTopSection.forEach(s=>{
     if (s.watchedSecs > 0) slices.push({ label:s.title, seconds:s.watchedSecs, color:getSectionColor(s.id,s.title) });
   });
   const remaining = Math.max(0, totals.totalSecs - totals.watchedSecs);
@@ -204,7 +272,7 @@ function renderAnalytics(){
   drawDonut(pieChartEl, slices);
 
   legendEl.innerHTML = "";
-  totals.perSection.forEach(s=>{
+  totals.perTopSection.forEach(s=>{
     const row = document.createElement("div");
     row.className = "legend-row";
     const input = document.createElement("input");
@@ -219,13 +287,13 @@ function renderAnalytics(){
 }
 function computeTotals(){
   let totalSecs=0, watchedSecs=0;
-  const perSection = state.sections.map(sec=>{
-    const total = sumSectionTotalSeconds(sec);
-    const watched = sumSectionWatchedSeconds(sec);
+  const perTopSection = state.sections.map(sec=>{
+    const total = sumSectionTotalSecondsDeep(sec);
+    const watched = sumSectionWatchedSecondsDeep(sec);
     totalSecs += total; watchedSecs += watched;
     return { id:sec.id, title:sec.title, totalSecs:total, watchedSecs:watched };
   });
-  return { totalSecs, watchedSecs, perSection };
+  return { totalSecs, watchedSecs, perTopSection };
 }
 function drawDonut(svg, slices){
   const cx=110, cy=110, R=100, r=62;
@@ -278,6 +346,7 @@ function applyContainerWidth(px){
 function setupEvents(){
   searchEl.addEventListener("input", ()=> renderSections());
   dailyGoalEl.addEventListener("input", ()=>{
+    pushUndo();
     state.settings.dailyGoalMinutes = Number(dailyGoalEl.value || 0);
     persist(); renderTodayMeta();
   });
@@ -287,6 +356,8 @@ function setupEvents(){
   addSectionBtn.addEventListener("click", addSection);
   fillTodayBtn.addEventListener("click", autoFillToday);
   clearTodayBtn.addEventListener("click", clearTodayQueue);
+  collapseAllBtn?.addEventListener("click", collapseAll);
+  expandAllBtn?.addEventListener("click", expandAll);
 
   startTimerBtn.addEventListener("click", ()=>{
     if (state.today.active) return;
@@ -301,53 +372,126 @@ function setupEvents(){
 
   if (themeSelect) themeSelect.addEventListener("change", e=> applyTheme(e.target.value));
   if (widthSelect) widthSelect.addEventListener("change", e=> applyContainerWidth(parseInt(e.target.value,10)));
+
+  // Undo / Redo buttons and shortcuts
+  undoBtn?.addEventListener("click", onUndo);
+  redoBtn?.addEventListener("click", onRedo);
+  window.addEventListener("keydown", (e)=>{
+    // Tab to indent/outdent when a section is selected
+    if (e.key === "Tab" && selectedSectionId){
+      e.preventDefault();
+      if (e.shiftKey) outdentSection(selectedSectionId);
+      else indentSection(selectedSectionId);
+      return;
+    }
+    const z = e.key.toLowerCase() === "z";
+    if ((e.ctrlKey || e.metaKey) && z && !e.shiftKey){ e.preventDefault(); onUndo(); }
+    else if ((e.ctrlKey || e.metaKey) && z && e.shiftKey){ e.preventDefault(); onRedo(); }
+  });
 }
 
 /* -------- CRUD -------- */
 function addSection(){
-  const title = prompt("Section name (eg, Pathoma — Chapter 4):");
+  const title = prompt("Section name (eg, Sketchy Micro):");
   if (!title) return;
-  state.sections.push({ id: cryptoId(), title, items: [] });
+  pushUndo();
+  (state.sections).push({ id: cryptoId(), title, items: [], children: [] });
+  persist(); renderAll();
+}
+function addSubsection(parentId){
+  const parent = findSection(parentId); if (!parent) return;
+  const title = prompt("Subsection name:"); if (!title) return;
+  pushUndo();
+  parent.children = parent.children || [];
+  parent.children.push({ id: cryptoId(), title, items: [], children: [] });
   persist(); renderAll();
 }
 function renameSection(secId){
   const sec = findSection(secId); if (!sec) return;
   const title = prompt("Rename section:", sec.title);
   if (!title) return;
+  pushUndo();
   sec.title = title; persist(); renderAll();
 }
 function deleteSection(secId){
-  if (!confirm("Delete this section and all its items?")) return;
-  const sec = findSection(secId);
-  if (sec){ sec.items.forEach(it => removeFromToday(secId, it.id, false)); }
-  state.sections = state.sections.filter(s => s.id !== secId);
+  if (!confirm("Delete this section (and all nested subsections/items)?")) return;
+  const ctx = findSectionCtx(secId); if (!ctx) return;
+  pushUndo();
+  // Remove any of its items from Today queue
+  const itemPairs = collectSectionItemPairsDeep(ctx.node);
+  for (const {sectionId,itemId} of itemPairs) removeFromToday(sectionId, itemId, false);
+  // Remove from parent children/root
+  if (ctx.parent){
+    ctx.parent.children = ctx.parent.children.filter(s => s.id !== secId);
+  }else{
+    state.sections = state.sections.filter(s => s.id !== secId);
+  }
   persist(); renderAll();
 }
 function addItem(secId){
   const sec = findSection(secId); if (!sec) return;
   const title = prompt("Item title:"); if (!title) return;
+  pushUndo();
+  sec.items = sec.items || [];
   sec.items.push({ id: cryptoId(), title, duration: "", notes: "", done: false });
   persist(); renderAll();
 }
 function deleteItem(secId, itemId){
   const sec = findSection(secId); if (!sec) return;
-  sec.items = sec.items.filter(i => i.id !== itemId);
+  pushUndo();
+  sec.items = (sec.items||[]).filter(i => i.id !== itemId);
   removeFromToday(secId, itemId, false);
   persist(); renderAll();
 }
 function moveItem(secId, itemId, dir){
   const sec = findSection(secId); if (!sec) return;
-  const idx = sec.items.findIndex(i=>i.id===itemId); if (idx<0) return;
-  const j = idx + dir; if (j<0 || j>=sec.items.length) return;
-  [sec.items[idx], sec.items[j]] = [sec.items[j], sec.items[idx]];
+  const items = sec.items || [];
+  const idx = items.findIndex(i=>i.id===itemId); if (idx<0) return;
+  const j = idx + dir; if (j<0 || j>=items.length) return;
+  pushUndo();
+  [items[idx], items[j]] = [items[j], items[idx]];
+  persist(); renderAll();
+}
+
+/* -------- Indent / Outdent (sections) -------- */
+function indentSection(secId){
+  const ctx = findSectionCtx(secId); if (!ctx) return;
+  const siblings = ctx.siblings;
+  const idx = siblings.findIndex(s=>s.id===secId);
+  if (idx <= 0) return; // no previous sibling to become parent
+  pushUndo();
+  const prev = siblings[idx-1];
+  siblings.splice(idx,1);
+  prev.children = prev.children || [];
+  prev.children.push(ctx.node);
+  persist(); renderAll();
+}
+function outdentSection(secId){
+  const ctx = findSectionCtx(secId); if (!ctx || !ctx.parentCtx) return;
+  pushUndo();
+  const parent = ctx.parentCtx.node;
+  const grandCtx = ctx.parentCtx;
+  // remove from current parent's children
+  parent.children = (parent.children||[]).filter(s => s.id!==secId);
+  // insert after parent in grandparent's list (or root)
+  if (grandCtx.parent){ // has grandparent
+    const gpChildren = grandCtx.parent.children;
+    const pIdx = gpChildren.findIndex(s=>s.id===parent.id);
+    gpChildren.splice(pIdx+1,0,ctx.node);
+  }else{
+    const root = state.sections;
+    const pIdx = root.findIndex(s=>s.id===parent.id);
+    root.splice(pIdx+1,0,ctx.node);
+  }
   persist(); renderAll();
 }
 
 /* -------- Today Queue -------- */
 function addToToday(sectionId, itemId){
   const sec = findSection(sectionId); if (!sec) return;
-  const it = sec.items.find(i=>i.id===itemId); if (!it || it.done) return;
+  const it = (sec.items||[]).find(i => i.id===itemId); if (!it || it.done) return;
   if (!state.today.queue.find(q => q.sectionId===sectionId && q.itemId===itemId)){
+    pushUndo();
     state.today.queue.push({sectionId, itemId}); persist(); renderToday();
   }
 }
@@ -356,17 +500,19 @@ function removeFromToday(sectionId, itemId, rerender=true){
   if (state.today.active && state.today.active.sectionId===sectionId && state.today.active.itemId===itemId){
     state.today.active = null;
   }
-  persist(); if (rerender) renderToday();
+  persist(undefined,{noHistory:true}); if (rerender) renderToday();
 }
 function moveToday(idx, dir){
   const j = idx + dir; if (j<0 || j>=state.today.queue.length) return;
+  pushUndo();
   [state.today.queue[idx], state.today.queue[j]] = [state.today.queue[j], state.today.queue[idx]];
   persist(); renderToday();
 }
-function clearTodayQueue(){ state.today.queue=[]; state.today.active=null; state.today.studiedSeconds = state.today.studiedSeconds || 0; persist(); renderToday(); }
+function clearTodayQueue(){ pushUndo(); state.today.queue=[]; state.today.active=null; state.today.studiedSeconds = state.today.studiedSeconds || 0; persist(); renderToday(); }
 function autoFillToday(){
   const goal = Number(state.settings.dailyGoalMinutes||0); if (!goal) return;
-  const remaining = uncompletedItems(); let minutes = totalPlannedMinutes(state.today.queue);
+  pushUndo();
+  const remaining = uncompletedItemsDeep(); let minutes = totalPlannedMinutes(state.today.queue);
   for (const {sec,it} of remaining){
     if (minutes >= goal) break;
     if (!state.today.queue.find(q => q.sectionId===sec.id && q.itemId===it.id)){
@@ -380,7 +526,8 @@ function autoFillToday(){
 /* -------- Timer -------- */
 function startTimer(sectionId, itemId){
   const sec = findSection(sectionId); if (!sec) return;
-  const it = sec.items.find(x=>x.id===itemId); if (!it) return;
+  const it = (sec.items||[]).find(x=>x.id===itemId); if (!it) return;
+  pushUndo();
   state.today.active = { sectionId, itemId, startedAt: Date.now(), elapsed: 0 };
   persist(); renderTimerUI(); setActiveLabel(it.title);
 }
@@ -395,7 +542,7 @@ function stopTimer(){
   const delta = Math.floor((Date.now() - state.today.active.startedAt)/1000);
   state.today.studiedSeconds += delta;
   const {sectionId, itemId} = state.today.active;
-  const sec = findSection(sectionId); if (sec){ const it = sec.items.find(i=>i.id===itemId); if (it) it.done = true; }
+  const sec = findSection(sectionId); if (sec){ const it = (sec.items||[]).find(i=>i.id===itemId); if (it) it.done = true; }
   removeFromToday(sectionId, itemId, false);
   state.today.active = null;
   persist(); renderAll();
@@ -428,13 +575,15 @@ function onImport(e){
     try{
       const imported = JSON.parse(reader.result);
       if (!imported.settings) imported.settings = state.settings;
-      state = imported; persist(); renderAll(); alert("Import complete.");
+      state = imported;
+      migrateToNestedModel();
+      persist(state, {noHistory:true}); renderAll(); alert("Import complete.");
     }catch{ alert("Invalid JSON."); }
     finally{ importFile.value = ""; }
   };
   reader.readAsText(file);
 }
-function onReset(){ if (!confirm("This resets ALL data. Continue?")) return; state = structuredClone(DEFAULT_DATA); persist(); renderAll(); }
+function onReset(){ if (!confirm("This resets ALL data. Continue?")) return; pushUndo(); state = structuredClone(DEFAULT_DATA); migrateToNestedModel(); persist(); renderAll(); }
 
 /* -------- Bulk CSV/XLSX -------- */
 function handleBulkFile(e){
@@ -459,15 +608,16 @@ function handleBulkFile(e){
 function importCSV(csvText){
   const rows = csvToObjects(csvText);
   if (!rows.length){ alert("No rows found."); return; }
+  pushUndo();
   let added=0, updated=0, createdSections=0;
   rows.forEach(r=>{
     const obj = normalizeRow(r);
     if (!obj.section || !obj.title) return;
-    let sec = state.sections.find(s => (s.title||"").trim() === obj.section);
-    if (!sec){ sec = { id: cryptoId(), title: obj.section, items: [] }; state.sections.push(sec); createdSections++; }
-    const existing = sec.items.find(i => (i.title||"").trim() === obj.title);
+    let sec = findSectionByTitleDeep(obj.section);
+    if (!sec){ sec = { id: cryptoId(), title: obj.section, items: [], children: [] }; state.sections.push(sec); createdSections++; }
+    const existing = (sec.items||[]).find(i => (i.title||"").trim() === obj.title);
     if (existing){ existing.duration = obj.duration || existing.duration || ""; existing.notes = obj.notes ?? existing.notes ?? ""; updated++; }
-    else { sec.items.push({ id: cryptoId(), title: obj.title, duration: obj.duration || "", notes: obj.notes || "", done: false }); added++; }
+    else { (sec.items = sec.items||[]).push({ id: cryptoId(), title: obj.title, duration: obj.duration || "", notes: obj.notes || "", done: false }); added++; }
   });
   persist(); renderAll();
   alert(`Bulk add complete.\nSections created: ${createdSections}\nItems added: ${added}\nItems updated: ${updated}`);
@@ -507,26 +657,6 @@ function normalizeRow(r){
     notes:    choose(["notes","note","comment"])
   };
 }
-
-function ensurePath(sectionPath){
-  // sectionPath can be 'Sketchy > Micro > Bacteria'
-  if (!sectionPath) return null;
-  const parts = String(sectionPath).split(/>|\||\//).map(s=>s.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  let parent = null;
-  let list = state.sections;
-  let node = null;
-  for (const name of parts){
-    node = (list||[]).find(s => (s.title||'').trim() === name);
-    if (!node){
-      node = { id: cryptoId(), title: name, items: [], children: [] };
-      list.push(node);
-    }
-    parent = node;
-    list = node.children;
-  }
-  return node;
-}
 function downloadTemplateCSV(){
   const sample =
 `Section,Title,Duration,Notes
@@ -541,107 +671,125 @@ Pathoma — Chapters 1–3,1.2 Cellular Injury,,
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
+/* -------- Collapse helpers -------- */
+function isCollapsed(id){ return !!(state.settings.collapsed && state.settings.collapsed[id]); }
+function setCollapsed(id, val){
+  state.settings.collapsed = state.settings.collapsed || {};
+  state.settings.collapsed[id] = !!val;
+  persist(undefined,{noHistory:true});
+}
+function collapseAll(){
+  walkSections(sec => { setCollapsed(sec.id, true); });
+  renderSections();
+}
+function expandAll(){
+  walkSections(sec => { setCollapsed(sec.id, false); });
+  renderSections();
+}
+
 /* -------- Helpers -------- */
-function findSection(id){ return state.sections.find(s => s.id === id); }
-function getItem(sectionId, itemId){ const sec=findSection(sectionId); if(!sec) return null; return sec.items.find(i=>i.id===itemId)||null; }
+function migrateToNestedModel(){
+  // Ensure every section has children array; keep existing structure
+  const ensure = (s)=>{
+    s.children = s.children || [];
+    s.items = s.items || [];
+    (s.children||[]).forEach(ensure);
+  };
+  (state.sections||[]).forEach(ensure);
+}
+function findSection(id){
+  let found=null;
+  walkSections(sec => { if (sec.id===id) found = sec; });
+  return found;
+}
+function findSectionByTitleDeep(title){
+  title = (title||"").trim();
+  let found=null;
+  walkSections(sec => { if ((sec.title||"").trim() === title) found = sec; });
+  return found;
+}
+function findSectionCtx(id){
+  // returns {node, parent, siblings, parentCtx}
+  let ctx=null;
+  function dfs(list, parentCtx){
+    for (let i=0;i<list.length;i++){
+      const s=list[i];
+      if (s.id===id){
+        ctx = {node:s, parent: parentCtx ? parentCtx.node : null, siblings: list, parentCtx};
+        return true;
+      }
+      if (s.children && s.children.length){
+        if (dfs(s.children, {node:s, parent: parentCtx?parentCtx.node:null, parentCtx})) return true;
+      }
+    }
+    return false;
+  }
+  dfs(state.sections, null);
+  return ctx;
+}
+function walkSections(fn){
+  const dfs = (list)=>{
+    list.forEach(s=>{ fn(s); if (s.children && s.children.length) dfs(s.children); });
+  };
+  dfs(state.sections||[]);
+}
+function getItem(sectionId, itemId){
+  const sec = findSection(sectionId); if (!sec) return null;
+  return (sec.items||[]).find(i=>i.id===itemId)||null;
+}
 function matchesQuery(it,q){ if(!q) return true; return (it.title||"").toLowerCase().includes(q) || (it.notes||"").toLowerCase().includes(q); }
 function asMinutes(hms){ if(!hms) return 0; const p=hms.split(":").map(Number); if(p.some(isNaN)) return 0; if(p.length===3){const[h,m,s]=p;return h*60+m+Math.round(s/60)} if(p.length===2){const[m,s]=p;return m+Math.round(s/60)} if(p.length===1){return Number(p[0])||0} return 0; }
 function toSeconds(hms){ if(!hms) return 0; const p=hms.split(":").map(Number); if(p.some(isNaN)) return 0; if(p.length===3){const[h,m,s]=p;return h*3600+m*60+s} if(p.length===2){const[m,s]=p;return m*60+s} if(p.length===1){return Number(p[0])*60||0} return 0; }
 function formatHMS(secs){ const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60), s=secs%60; const pad=n=>String(n).padStart(2,"0"); return `${pad(h)}:${pad(m)}:${pad(s)}`; }
 function formatHM(secs){ const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60); return h?`${h}h ${String(m).padStart(2,"0")}m`:`${m}m`; }
-function sumSectionTotalSeconds(sec){ return sec.items.reduce((sum,it)=> sum + toSeconds(it.duration||"0"), 0); }
-function sumSectionWatchedSeconds(sec){ return sec.items.reduce((sum,it)=> sum + (it.done?toSeconds(it.duration||"0"):0), 0); }
-function uncompletedItems(){ const out=[]; state.sections.forEach(sec=> sec.items.forEach(it=>{ if(!it.done) out.push({sec,it}); })); return out; }
-function totalPlannedMinutes(queue){ let total=0; queue.forEach(q=>{ const it=getItem(q.sectionId,q.itemId); total += asMinutes(it?.duration || "0"); }); return total; }
-function totalDoneOverall(){ let done=0,total=0; state.sections.forEach(sec=> sec.items.forEach(it=>{ total++; if(it.done) done++; })); return [done,total]; }
-function calcStreak(){ const today=todayISO(); state.history[today]=Math.round((state.today.studiedSeconds||0)/60); persist(); let streak=0; let d=new Date(today); while(true){ const key=d.toISOString().slice(0,10); const minutes=state.history[key]||0; if(minutes>0){ streak++; d.setDate(d.getDate()-1); } else break; } return streak; }
+
+function sumSectionTotalSecondsDeep(sec){
+  let sum=0;
+  (sec.items||[]).forEach(it=> sum += toSeconds(it.duration||"0"));
+  (sec.children||[]).forEach(ch=> sum += sumSectionTotalSecondsDeep(ch));
+  return sum;
+}
+function sumSectionWatchedSecondsDeep(sec){
+  let sum=0;
+  (sec.items||[]).forEach(it=> sum += (it.done?toSeconds(it.duration||"0"):0));
+  (sec.children||[]).forEach(ch=> sum += sumSectionWatchedSecondsDeep(ch));
+  return sum;
+}
+function countDoneTotalDeep(sec){
+  let done=0,total=0;
+  (sec.items||[]).forEach(it=>{ total++; if (it.done) done++; });
+  (sec.children||[]).forEach(ch=>{ const [d,t]=countDoneTotalDeep(ch); done+=d; total+=t; });
+  return [done,total];
+}
+function uncompletedItemsDeep(){
+  const out=[];
+  walkSections(sec => (sec.items||[]).forEach(it=>{ if(!it.done) out.push({sec,it}); }));
+  return out;
+}
+function totalPlannedMinutes(queue){
+  let total=0; queue.forEach(q=>{ const it=getItem(q.sectionId, q.itemId); total += asMinutes(it?.duration || "0"); }); return total;
+}
+function totalDoneOverallDeep(){
+  let done=0,total=0;
+  walkSections(sec => (sec.items||[]).forEach(it=>{ total++; if(it.done) done++; }));
+  return [done,total];
+}
+function collectSectionItemPairsDeep(sec){
+  const pairs=[];
+  (sec.items||[]).forEach(it=> pairs.push({sectionId:sec.id, itemId:it.id}));
+  (sec.children||[]).forEach(ch=> pairs.push(...collectSectionItemPairsDeep(ch)));
+  return pairs;
+}
+function calcStreak(){
+  const today=todayISO(); state.history[today]=Math.round((state.today.studiedSeconds||0)/60); persist(undefined,{noHistory:true});
+  let streak=0; let d=new Date(today);
+  while(true){
+    const key=d.toISOString().slice(0,10);
+    const minutes=state.history[key]||0;
+    if(minutes>0){ streak++; d.setDate(d.getDate()-1); } else break;
+  }
+  return streak;
+}
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function cryptoId(){ if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,10); }
-function hash(str){ let h=0; for(let i=0;i<str.length;i++){ h=((h<<5)-h)+str.charCodeAt(i); h|=0; } return h; 
-function setupSidepanel(){
-  const btn = document.getElementById('toggleSidepanel');
-  const panel = document.getElementById('sidepanel');
-  const hidden = localStorage.getItem(SIDEPANEL_KEY) === '1';
-  if (hidden) panel.classList.add('hidden');
-  btn.addEventListener('click', ()=>{
-    panel.classList.toggle('hidden');
-    localStorage.setItem(SIDEPANEL_KEY, panel.classList.contains('hidden') ? '1' : '0');
-  });
-}
-
-function setupDragAndDrop(){
-  // Root container and all children containers will accept drops
-  const root = document.getElementById('sections');
-  root.addEventListener('dragover', onDragOver);
-  root.addEventListener('drop', onDrop);
-}
-
-let dragSrcId = null;
-function addDnDHandlers(cardEl, sec){
-  cardEl.addEventListener('dragstart', (e)=>{
-    dragSrcId = sec.id;
-    cardEl.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-  });
-  cardEl.addEventListener('dragend', ()=>{
-    cardEl.classList.remove('dragging');
-    dragSrcId = null;
-  });
-  // Allow drop within children container too
-  cardEl.querySelector('.children').addEventListener('dragover', onDragOver);
-  cardEl.querySelector('.children').addEventListener('drop', onDrop);
-}
-
-function onDragOver(e){
-  e.preventDefault();
-  const targetCard = e.target.closest('details.card');
-  const childrenWrap = e.target.closest('.children');
-  if (childrenWrap){ childrenWrap.classList.add('drophover'); setTimeout(()=> childrenWrap.classList.remove('drophover'), 120); }
-  e.dataTransfer.dropEffect = 'move';
-}
-
-function onDrop(e){
-  e.preventDefault();
-  const targetCard = e.target.closest('details.card');
-  const dropInChildren = e.target.closest('.children');
-  if (!dragSrcId) return;
-  const srcCtx = findSectionCtx(dragSrcId);
-  if (!srcCtx) return;
-  if (dropInChildren){
-    // Same parent reordering? We only reorder among siblings; ignore if parents differ.
-    const targetParentId = dropInChildren.closest('details.card')?.dataset?.secId || null;
-    const parent = targetParentId ? findSection(targetParentId) : null;
-    const siblings = parent ? parent.children : state.sections;
-    // If dropping into a children container with no targetCard, put to end of that siblings list
-    if (parent){
-      if (srcCtx.parent?.id !== parent.id){ return; } // different parent; use indent/outdent to change parents
-      const idx = siblings.findIndex(s=>s.id===srcCtx.node.id);
-      if (idx>=0){ pushUndo(); siblings.splice(idx,1); siblings.push(srcCtx.node); persist(); renderAll(); }
-    }else{
-      if (srcCtx.parent){ return; } // root only
-      const idx = state.sections.findIndex(s=>s.id===srcCtx.node.id);
-      if (idx>=0){ pushUndo(); state.sections.splice(idx,1); state.sections.push(srcCtx.node); persist(); renderAll(); }
-    }
-    return;
-  }
-  if (!targetCard) return;
-  const targetId = targetCard.dataset.secId;
-  if (dragSrcId === targetId) return;
-
-  const tgtCtx = findSectionCtx(targetId);
-  if (!tgtCtx) return;
-
-  // Reorder only among same siblings
-  if (String(srcCtx.parent?.id || '') !== String(tgtCtx.parent?.id || '')) return;
-
-  const siblings = srcCtx.siblings;
-  const from = siblings.findIndex(s=>s.id===srcCtx.node.id);
-  const to = siblings.findIndex(s=>s.id===tgtCtx.node.id);
-  if (from < 0 || to < 0 || from === to) return;
-
-  pushUndo();
-  const [moved] = siblings.splice(from,1);
-  const insertAt = (e.clientY < targetCard.getBoundingClientRect().top + targetCard.offsetHeight/2) ? to : to+1;
-  siblings.splice(insertAt > from ? insertAt-1 : insertAt, 0, moved);
-  persist(); renderAll();
-}
+function hash(str){ let h=0; for(let i=0;i<str.length;i++){ h=((h<<5)-h)+str.charCodeAt(i); h|=0; } return h; }
