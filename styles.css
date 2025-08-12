@@ -1,11 +1,11 @@
 /* ========== Theme variables ========== */
 :root{
-  --container-max: 1400px;          /* wider default */
+  --container-max: 1400px;
   --bg:#0b1225; --card:#111827; --text:#e5e7eb; --muted:#9aa3b2;
   --accent:#22c55e; --danger:#ef4444; --border:rgba(148,163,184,.2);
 }
 
-/* Themes override variables on <body> */
+/* Themes */
 body.theme-dark{
   --bg:#0b1225; --card:#111827; --text:#e5e7eb; --muted:#9aa3b2;
   --accent:#22c55e; --danger:#ef4444; --border:rgba(148,163,184,.2);
@@ -38,6 +38,11 @@ body{
   display:flex; align-items:center; justify-content:space-between;
   gap:16px; padding:16px; border-bottom:1px solid var(--border); backdrop-filter: blur(6px);
 }
+.topbar .left{display:flex; align-items:center; gap:10px}
+.topbar #toggleSidepanel{
+  background:#0f172a10; color:var(--text); border:1px solid var(--border);
+  border-radius:8px; padding:8px 10px; cursor:pointer;
+}
 h1{margin:0;font-size:22px}
 .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
 .controls .spacer{width:8px}
@@ -56,7 +61,7 @@ h1{margin:0;font-size:22px}
 .controls .import input{display:none}
 .controls .import{border:1px dashed var(--border); padding:6px 10px; border-radius:8px; cursor:pointer}
 
-/* Global progress container now wider via --container-max */
+/* Global progress */
 .global-progress-wrap{
   display:grid; grid-template-columns:240px 1fr; gap:12px;
   max-width:var(--container-max); margin:12px auto 0; padding:0 16px;
@@ -67,11 +72,14 @@ h1{margin:0;font-size:22px}
 .count-muted{color:var(--muted)}
 .progress-wide{width:100%}
 
-/* Main grid expands wider */
+/* Main grid */
 .grid{
   display:grid; grid-template-columns:2fr 1fr; gap:16px;
   max-width:var(--container-max); margin:16px auto 20px; padding:0 16px;
 }
+.today-panel{grid-column:1 / -1}
+
+/* Panels */
 .panel{
   background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px;
 }
@@ -95,7 +103,13 @@ h1{margin:0;font-size:22px}
 
 /* Nested subsections */
 .children{padding:4px 0 0 18px; margin-left:10px; border-left:1px dashed var(--border)}
+.children.drophover{border-left-color:var(--accent)}
 
+/* Drag handle cues */
+.card[draggable="true"] .summary{cursor:grab}
+.card.dragging{opacity:.7; outline:2px dashed var(--accent)}
+
+/* Items */
 .item{
   display:grid; grid-template-columns:auto 1fr 110px 1fr auto; gap:8px; align-items:center;
   padding:8px; border-bottom:1px dashed var(--border);
@@ -133,12 +147,15 @@ h1{margin:0;font-size:22px}
 .legend-row{display:flex; align-items:center; gap:8px; font-size:14px}
 .legend-row input[type="color"]{width:24px; height:24px; border:none; background:transparent; padding:0}
 
-/* Left fixed side tools */
+/* Collapsible sidepanel */
 .sidepanel{
   position:fixed; left:12px; top:76px; z-index:10;
   background:var(--card); border:1px solid var(--border); border-radius:12px;
   padding:10px; width:210px; box-shadow:0 6px 24px rgba(0,0,0,.2);
+  transition: transform .2s ease, opacity .2s ease;
 }
+.sidepanel.hidden{transform:translateX(-120%); opacity:0; pointer-events:none}
+
 .sidepanel-title{font-weight:700; margin-bottom:6px}
 .sidepanel-row{display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0}
 .sidepanel-row select{
