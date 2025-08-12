@@ -4,13 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Goal Grinder</title>
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=9" />
+  <!-- Optional: enables XLSX uploads for Bulk Add (keep if you use .xlsx) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 
+<!-- Default theme class; app.js will switch this on load -->
 <body class="theme-dark">
-  <!-- Collapsible appearance panel -->
-  <aside class="sidepanel" aria-label="Appearance" id="sidepanel">
+  <!-- Appearance controls (theme + width) -->
+  <aside class="sidepanel" aria-label="Appearance">
     <div class="sidepanel-title">Appearance</div>
     <label class="sidepanel-row">
       <span>Theme</span>
@@ -35,10 +37,7 @@
 
   <!-- Top bar -->
   <header class="topbar">
-    <div class="left">
-      <button id="toggleSidepanel" title="Show/Hide Appearance">☰</button>
-      <h1>Goal Grinder</h1>
-    </div>
+    <h1>Goal Grinder</h1>
     <div class="controls">
       <input id="search" type="search" placeholder="Search videos or task…" />
       <label class="goal">
@@ -73,8 +72,44 @@
 
   <!-- Main layout -->
   <main class="grid">
-    <!-- Today queue - now full width at top -->
-    <aside class="panel today-panel" id="todayPanel">
+    <!-- Analytics panel -->
+    <section class="panel" id="analyticsPanel">
+      <div class="panel-header">
+        <h2>Analytics</h2>
+      </div>
+      <div class="analytics">
+        <div class="analytics-row">
+          <div><strong>Total Video Duration:</strong> <span id="totalDuration">0:00</span></div>
+          <div><strong>Watched:</strong> <span id="watchedDuration">0:00</span></div>
+        </div>
+
+        <div class="donut-wrap">
+          <svg id="pieChart" viewBox="0 0 220 220" width="220" height="220" aria-label="Watched by section"></svg>
+          <div id="pieCenter" class="donut-center">0%</div>
+        </div>
+
+        <div id="legend" class="legend"></div>
+      </div>
+    </section>
+
+    <!-- Sections list -->
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Sections</h2>
+        <div class="panel-header-right">
+          <button id="collapseAllBtn" title="Collapse all sections">Collapse All</button>
+          <button id="expandAllBtn" title="Expand all sections">Expand All</button>
+          <button id="addSectionBtn">+ Add Section</button>
+        </div>
+      </div>
+      <div id="sections"></div>
+      <div class="muted" style="padding:8px 4px 0">
+        Bulk format: Section, Title, Duration (mm:ss or hh:mm:ss), Notes
+      </div>
+    </section>
+
+    <!-- Today queue -->
+    <aside class="panel">
       <div class="panel-header">
         <h2>Today Queue</h2>
         <div class="muted" id="todayMeta"></div>
@@ -106,50 +141,15 @@
         <div><strong>Streak:</strong> <span id="streakDays">0 days</span></div>
       </div>
     </aside>
-
-    <!-- Sections list -->
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Sections</h2>
-        <div class="panel-header-right">
-          <button id="collapseAllBtn" title="Collapse all sections">Collapse All</button>
-          <button id="expandAllBtn" title="Expand all sections">Expand All</button>
-          <button id="addSectionBtn">+ Add Section</button>
-        </div>
-      </div>
-      <div id="sections"></div>
-      <div class="muted" style="padding:8px 4px 0">
-        Bulk format: Section or Section Path, Title, Duration (mm:ss or hh:mm:ss), Notes
-      </div>
-    </section>
-
-    <!-- Analytics panel -->
-    <section class="panel" id="analyticsPanel">
-      <div class="panel-header">
-        <h2>Analytics</h2>
-      </div>
-      <div class="analytics">
-        <div class="analytics-row">
-          <div><strong>Total Video Duration:</strong> <span id="totalDuration">0:00</span></div>
-          <div><strong>Watched:</strong> <span id="watchedDuration">0:00</span></div>
-        </div>
-
-        <div class="donut-wrap">
-          <svg id="pieChart" viewBox="0 0 220 220" width="220" height="220" aria-label="Watched by section"></svg>
-          <div id="pieCenter" class="donut-center">0%</div>
-        </div>
-
-        <div id="legend" class="legend"></div>
-      </div>
-    </section>
   </main>
 
   <!-- Templates (used by app.js) -->
   <template id="sectionTmpl">
-    <details class="card" open draggable="true">
+    <details class="card" open>
       <summary class="summary">
         <div class="summary-left">
           <span class="section-title"></span>
+          <!-- app.js writes: “X/Y shown • TRT H:MM” -->
           <span class="count muted"></span>
         </div>
         <div class="summary-right">
@@ -163,7 +163,7 @@
         </div>
       </summary>
       <div class="items"></div>
-      <div class="children droptarget"></div>
+      <div class="children"></div>
     </details>
   </template>
 
@@ -195,7 +195,8 @@
     </div>
   </template>
 
-  <script src="data.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <!-- Scripts (cache-busted) -->
+  <script src="data.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
