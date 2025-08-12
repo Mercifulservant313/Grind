@@ -63,7 +63,8 @@ tickTimer(); setInterval(tickTimer, 1000);
 function loadState(){
   const raw = localStorage.getItem(LS_KEY);
   if (!raw){
-    const starter = structuredClone(DEFAULT_DATA);
+    const fallback = { settings:{dailyGoalMinutes:120, sectionColors:{}, collapsed:{}}, sections:[], today:{ date: new Date().toISOString().slice(0,10), queue: [], active: null, studiedSeconds:0 }, history:{} };
+    const starter = structuredClone(typeof DEFAULT_DATA !== 'undefined' ? DEFAULT_DATA : fallback);
     starter.settings = starter.settings || {};
     starter.settings.dailyGoalMinutes ??= 120;
     starter.settings.sectionColors ??= {};
