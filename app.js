@@ -10,6 +10,12 @@ const UNDO_MAX = 80;
 let undoStack = [];
 let redoStack = [];
 let selectedSectionId = null;
+
+// Drag info for moving items within a section
+let dragInfo = null;
+
+// Drag info for moving top-level sections
+let sectionDragInfo = null;
 function pushUndo(){
   try{ undoStack.push(JSON.stringify(state)); if (undoStack.length>UNDO_MAX) undoStack.shift(); redoStack.length = 0; }catch{}
 }
@@ -39,6 +45,7 @@ const dailyGoalEl = document.getElementById("dailyGoal");
 const exportBtn = document.getElementById("exportBtn");
 const importFile = document.getElementById("importFile");
 const resetBtn = document.getElementById("resetBtn");
+const deleteAllBtn = document.getElementById("deleteAllBtn");
 const addSectionBtn = document.getElementById("addSectionBtn");
 const fillTodayBtn = document.getElementById("fillTodayBtn");
 const clearTodayBtn = document.getElementById("clearTodayBtn");
@@ -185,9 +192,63 @@ function renderSection(sec, depth, q){
     setCollapsed(sec.id, !detailsEl.open);
   });
 
+  // Provide move up/down controls and drag-handle for top-level sections
+  if (depth === 0) {
+    const left = el.querySelector(".summary-left");
+    if (left) {
+      // Move up button
+      const upBtn = document.createElement("button");
+      upBtn.className = "moveSectionUp";
+      upBtn.textContent = "↑";
+      upBtn.title = "Move section up";
+      upBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        moveSection(sec.id, -1);
+      });
+      // Move down button
+      const downBtn = document.createElement("button");
+      downBtn.className = "moveSectionDown";
+      downBtn.textContent = "↓";
+      downBtn.title = "Move section down";
+      downBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        moveSection(sec.id, +1);
+      });
+      // Insert the buttons before the section title (down first then up so up ends up leftmost)
+      left.insertBefore(downBtn, left.firstChild);
+      left.insertBefore(upBtn, left.firstChild);
+      // Add a dedicated drag handle for top-level sections
+      const handle = document.createElement("span");
+      handle.className = "drag-handle";
+      handle.textContent = "↕";
+      handle.draggable = true;
+      handle.dataset.secId = sec.id;
+      handle.addEventListener("dragstart", handleSectionDragStart);
+      handle.addEventListener("dragend", handleSectionDragEnd);
+      left.insertBefore(handle, left.firstChild);
+    }
+    // Make the whole card draggable for easier drag area
+    detailsEl.draggable = true;
+    // Propagate dataset for section id on the summary
+    detailsEl.dataset.secId = sec.id;
+    detailsEl.addEventListener("dragstart", handleSectionDragStart);
+    detailsEl.addEventListener("dragend", handleSectionDragEnd);
+
+    // Allow drop and dragover events on each top-level section itself to assist with reordering
+    detailsEl.addEventListener("dragover", handleSectionDragOver);
+    detailsEl.addEventListener("drop", handleSectionDrop);
+  }
+
   // Render items
   visibleItems.forEach(it=>{
     const row = itemTmpl.content.firstElementChild.cloneNode(true);
+    // Enable drag-and-drop for items
+    const idxInItems = (items || []).indexOf(it);
+    row.draggable = true;
+    row.dataset.secId = sec.id;
+    row.dataset.index = idxInItems;
+    row.addEventListener("dragstart", handleDragStart);
+    row.addEventListener("dragend", handleDragEnd);
     const doneEl = row.querySelector(".done");
     const titleIn = row.querySelector(".title");
     const durIn = row.querySelector(".duration");
@@ -210,6 +271,17 @@ function renderSection(sec, depth, q){
 
     itemsWrap.appendChild(row);
   });
+
+  // Make this items wrapper a drop zone for item drag-and-drop
+  if (itemsWrap){
+    itemsWrap.dataset.secId = sec.id;
+    itemsWrap.addEventListener("dragover", handleDragOver);
+    itemsWrap.addEventListener("drop", handleDrop);
+    itemsWrap.addEventListener("dragleave", (e)=>{
+      itemsWrap.classList.remove("dragover");
+      clearInsertMarker(itemsWrap);
+    });
+  }
 
   // Render children
   (sec.children||[]).forEach(child => {
@@ -373,6 +445,19 @@ function setupEvents(){
   if (themeSelect) themeSelect.addEventListener("change", e=> applyTheme(e.target.value));
   if (widthSelect) widthSelect.addEventListener("change", e=> applyContainerWidth(parseInt(e.target.value,10)));
 
+  // Delete All button
+  if (typeof deleteAllBtn !== 'undefined' && deleteAllBtn) deleteAllBtn.addEventListener("click", onDeleteAll);
+
+  // Section drag/drop events for top-level sections
+  if (sectionsEl) {
+    sectionsEl.addEventListener("dragover", handleSectionDragOver);
+    sectionsEl.addEventListener("drop", handleSectionDrop);
+    sectionsEl.addEventListener("dragleave", (e)=>{
+      sectionsEl.classList.remove("dragover");
+      clearInsertMarker(sectionsEl);
+    });
+  }
+
   // Undo / Redo buttons and shortcuts
   undoBtn?.addEventListener("click", onUndo);
   redoBtn?.addEventListener("click", onRedo);
@@ -451,6 +536,20 @@ function moveItem(secId, itemId, dir){
   pushUndo();
   [items[idx], items[j]] = [items[j], items[idx]];
   persist(); renderAll();
+}
+
+/* -------- Move Top-Level Sections -------- */
+function moveSection(secId, dir){
+  const secs = state.sections || [];
+  const idx = secs.findIndex(s => s.id === secId);
+  if (idx < 0) return;
+  const newIndex = idx + dir;
+  if (newIndex < 0 || newIndex >= secs.length) return;
+  pushUndo();
+  const [sec] = secs.splice(idx, 1);
+  secs.splice(newIndex, 0, sec);
+  persist();
+  renderAll();
 }
 
 /* -------- Indent / Outdent (sections) -------- */
@@ -584,6 +683,208 @@ function onImport(e){
   reader.readAsText(file);
 }
 function onReset(){ if (!confirm("This resets ALL data. Continue?")) return; pushUndo(); state = structuredClone(DEFAULT_DATA); migrateToNestedModel(); persist(); renderAll(); }
+
+/* -------- Delete All -------- */
+function onDeleteAll(){
+  if (!confirm("Delete ALL data (sections, today queue, history)? This cannot be undone.")) return;
+  const keepGoal = state && state.settings && typeof state.settings.dailyGoalMinutes !== "undefined" ? state.settings.dailyGoalMinutes : 120;
+  state = {
+    settings: {
+      dailyGoalMinutes: keepGoal,
+      sectionColors: {},
+      collapsed: {}
+    },
+    sections: [],
+    today: { date: todayISO(), queue: [], active: null, studiedSeconds: 0 },
+    history: {}
+  };
+  persist();
+  renderAll();
+}
+
+/* -------- Drag & Drop (Items & Sections) -------- */
+// Handle drag start for items
+function handleDragStart(e){
+  e.stopPropagation();
+  const el = e.currentTarget;
+  dragInfo = {
+    sectionId: el.dataset.secId,
+    fromIndex: parseInt(el.dataset.index, 10)
+  };
+  el.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragInfo.sectionId);
+}
+
+// Handle drag end for items
+function handleDragEnd(e){
+  e.stopPropagation();
+  const el = e.currentTarget;
+  el.classList.remove("dragging");
+  dragInfo = null;
+}
+
+// Handle drag over for items drop zone
+function handleDragOver(e){
+  if (!dragInfo) return;
+  e.preventDefault();
+  const container = e.currentTarget;
+  container.classList.add("dragover");
+  const afterEl = getDragAfterElement(container, e.clientY);
+  showInsertMarker(container, afterEl);
+}
+
+// Handle drop for items
+function handleDrop(e){
+  if (!dragInfo) return;
+  e.preventDefault();
+  const container = e.currentTarget;
+  container.classList.remove("dragover");
+  clearInsertMarker(container);
+  const afterEl = getDragAfterElement(container, e.clientY);
+  let toIndex;
+  if (!afterEl){
+    toIndex = container.children.length;
+  }else{
+    toIndex = parseInt(afterEl.dataset.index, 10);
+  }
+  moveItemDrag(dragInfo.sectionId, dragInfo.fromIndex, toIndex);
+}
+
+// Compute the element after which to insert during drag
+function getDragAfterElement(container, mouseY){
+  const children = [...container.querySelectorAll('.item:not(.dragging)')];
+  let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
+  for (const child of children){
+    const box = child.getBoundingClientRect();
+    const offset = mouseY - (box.top + box.height / 2);
+    if (offset < 0 && offset > closest.offset){
+      closest = { offset, element: child };
+    }
+  }
+  return closest.element;
+}
+
+// Show a marker at drop position
+function showInsertMarker(container, afterEl){
+  clearInsertMarker(container);
+  const marker = document.createElement('div');
+  marker.className = 'insert-marker';
+  if (afterEl) container.insertBefore(marker, afterEl);
+  else container.appendChild(marker);
+}
+
+// Clear any existing insert markers
+function clearInsertMarker(container){
+  container.querySelectorAll('.insert-marker').forEach(el => el.remove());
+}
+
+// Move an item within its section
+function moveItemDrag(sectionId, fromIndex, toIndex){
+  if (fromIndex === toIndex) return;
+  const sec = findSection(sectionId); if (!sec) return;
+  const items = sec.items || [];
+  if (fromIndex < 0 || fromIndex >= items.length) return;
+  if (toIndex < 0) toIndex = 0;
+  if (toIndex > items.length) toIndex = items.length;
+  pushUndo();
+  const [item] = items.splice(fromIndex, 1);
+  // adjust index if we removed earlier
+  if (fromIndex < toIndex) toIndex--;
+  items.splice(toIndex, 0, item);
+  persist();
+  renderAll();
+}
+
+/* Section drag handlers */
+function handleSectionDragStart(e){
+  // do not stop propagation here so drag events bubble up to section container
+  const el = e.currentTarget;
+  // Determine the section id either from the handle itself or its closest card
+  let secId = el.dataset.secId;
+  if (!secId) {
+    const card = el.closest('.card');
+    if (card) secId = card.dataset.secId;
+  }
+  if (!secId) return;
+  const idx = (state.sections || []).findIndex(s => s.id === secId);
+  if (idx < 0) return;
+  sectionDragInfo = { secId, fromIndex: idx };
+  // Add dragging class to the entire card to visualize movement
+  const card = el.closest('.card');
+  if (card) card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', secId);
+}
+
+function handleSectionDragEnd(e){
+  // no need to stop propagation on drag end
+  const el = e.currentTarget;
+  // Remove dragging highlight from the parent card
+  const card = el.closest('.card');
+  if (card) card.classList.remove('dragging');
+  sectionDragInfo = null;
+}
+
+function handleSectionDragOver(e){
+  if (!sectionDragInfo) return;
+  e.preventDefault();
+  const container = sectionsEl;
+  container.classList.add('dragover');
+  const afterEl = getSectionDragAfterElement(container, e.clientY);
+  showInsertMarker(container, afterEl);
+}
+
+function handleSectionDrop(e){
+  if (!sectionDragInfo) return;
+  e.preventDefault();
+  const container = sectionsEl;
+  container.classList.remove('dragover');
+  clearInsertMarker(container);
+  const afterEl = getSectionDragAfterElement(container, e.clientY);
+  const fromIndex = sectionDragInfo.fromIndex;
+  let toIndex;
+  if (!afterEl){
+    toIndex = state.sections.length - 1;
+  }else{
+    const secId = afterEl.dataset.secId;
+    toIndex = (state.sections || []).findIndex(s => s.id === secId);
+    if (fromIndex < toIndex) toIndex = toIndex - 1;
+  }
+  moveSectionDrag(fromIndex, toIndex);
+}
+
+function getSectionDragAfterElement(container, mouseY){
+  // Only consider direct child sections (top-level), ignore nested subsections
+  const children = [...container.children].filter(ch => {
+    return ch.tagName && ch.tagName.toLowerCase() === 'details' && ch.classList.contains('card') && !ch.classList.contains('dragging');
+  });
+  let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
+  for (const child of children) {
+    const box = child.getBoundingClientRect();
+    const offset = mouseY - (box.top + box.height / 2);
+    if (offset < 0 && offset > closest.offset) {
+      closest = { offset, element: child };
+    }
+  }
+  return closest.element;
+}
+
+function moveSectionDrag(fromIndex, toIndex){
+  if (fromIndex < 0 || toIndex < 0) return;
+  if (fromIndex === toIndex) return;
+  const secs = state.sections || [];
+  if (fromIndex >= secs.length) return;
+  // clamp toIndex to array bounds (can be equal to length for append)
+  if (toIndex > secs.length) toIndex = secs.length;
+  pushUndo();
+  const [sec] = secs.splice(fromIndex, 1);
+  // Adjust target index if removing earlier in the list
+  if (fromIndex < toIndex) toIndex--;
+  secs.splice(toIndex, 0, sec);
+  persist();
+  renderAll();
+}
 
 /* -------- Bulk CSV/XLSX -------- */
 function handleBulkFile(e){
